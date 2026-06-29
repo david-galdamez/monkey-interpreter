@@ -1,4 +1,4 @@
-pub type TokenType = String;
+pub type TokenType = &'static str;
 
 #[derive(Debug, Default)]
 pub struct Token {
@@ -21,11 +21,11 @@ pub const PLUS: &'static str = "+";
 pub const COMMA: &'static str = ",";
 pub const SEMICOLON: &'static str = ";";
 
-const LPAREN: &'static str = "(";
-const RPAREN: &'static str = ")";
-const LBRACE: &'static str = "{";
-const RBRACE: &'static str = "}";
+pub const LPAREN: &'static str = "(";
+pub const RPAREN: &'static str = ")";
+pub const LBRACE: &'static str = "{";
+pub const RBRACE: &'static str = "}";
 
 // Keywords
-const FUNCTION: &'static str = "FUNCTION";
-const LET: &'static str = "LET";
+pub const FUNCTION: &'static str = "FUNCTION";
+pub const LET: &'static str = "LET";
