@@ -1,0 +1,40 @@
+use std::{iter::Peekable, str::Chars};
+
+struct Lexer<'a> {
+    input: &'a str,
+    input_iter: Peekable<Chars<'a>>,
+    ch: char,
+}
+
+impl<'a> Lexer<'a> {
+    pub fn new<'a>(input: &'a str) -> Lexer<'a> {
+        return Lexer {
+            input: input,
+            input_iter: input.chars().peekable(),
+            ch: char::default(),
+        };
+    }
+
+    pub fn read_char(&mut self) {
+        if let None = self.input_iter.peek() {
+            self.ch = char::default();
+        } else {
+            self.ch = self.input_iter.next().unwrap_or_default();
+        }
+    }
+}
+
+// #[cfg(test)]
+// mod tests {
+//
+//     use crate::token;
+//
+//     struct Expected {
+//         expected_type: token::TokenType,
+//         expected_literal: String,
+//     }
+//
+//     fn test_next_token() {
+//         let input = "=+(){},;";
+//     }
+// }
