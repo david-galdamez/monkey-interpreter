@@ -37,16 +37,32 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    pub fn read_identifier(&mut self) -> String {
-        let position = self.position;
-        while self.ch.is_alphabetic() {
+    fn read_identifier(&mut self) -> String {
+        let position = self.position - 1;
+        while self.ch.is_alphabetic() || self.ch == '_' {
             self.read_char();
         }
-        self.input[position..self.position].to_string()
+        self.input[position..self.position].trim().to_string()
+    }
+
+    fn read_number(&mut self) -> String {
+        let position = self.position - 1;
+        while self.ch.is_numeric() {
+            self.read_char();
+        }
+        self.input[position..self.position].trim().to_string()
+    }
+
+    fn skip_whitespace(&mut self) {
+        if self.ch.is_whitespace() {
+            self.read_char();
+        }
     }
 
     pub fn next_token(&mut self) -> token::Token {
         let mut token = token::Token::default();
+
+        self.skip_whitespace();
 
         match self.ch {
             '=' => token = new_token(token::ASSIGN, self.ch),
@@ -62,8 +78,13 @@ impl<'a> Lexer<'a> {
                 token.token_type = token::EOF;
             }
             other => {
-                if other.is_alphabetic() {
+                if other.is_alphabetic() || other == '_' {
                     token.literal = self.read_identifier();
+                    token.token_type = token::lookup_ident(&token.literal);
+                    return token;
+                } else if other.is_numeric() {
+                    token.token_type = token::INT;
+                    token.literal = self.read_number();
                     return token;
                 } else {
                     token = new_token(token::ILLEGAL, other)
@@ -87,7 +108,7 @@ mod tests {
 
     #[test]
     fn test_next_token() {
-        let input = " let five = 5;
+        let input = "let five = 5;
         let ten = 10;
 
         let add = fn(x,y) {

@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 pub type TokenType = &'static str;
 
 #[derive(Debug, Default)]
@@ -29,3 +31,11 @@ pub const RBRACE: &str = "}";
 // Keywords
 pub const FUNCTION: &str = "FUNCTION";
 pub const LET: &str = "LET";
+
+pub fn lookup_ident(ident: &str) -> TokenType {
+    match ident {
+        "fn" => FUNCTION,
+        "let" => LET,
+        _other => IDENT,
+    }
+}
