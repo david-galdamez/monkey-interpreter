@@ -6,26 +6,26 @@ pub struct Token {
     pub literal: String,
 }
 
-pub const ILLEGAL: &'static str = "ILLEGAL";
-pub const EOF: &'static str = "EOF";
+pub const ILLEGAL: &str = "ILLEGAL";
+pub const EOF: &str = "EOF";
 
 // Identifiers + literals
-pub const IDENT: &'static str = "IDENT";
-pub const INT: &'static str = "INT";
+pub const IDENT: &str = "IDENT";
+pub const INT: &str = "INT";
 
 // Operators
-pub const ASSIGN: &'static str = "=";
-pub const PLUS: &'static str = "+";
+pub const ASSIGN: &str = "=";
+pub const PLUS: &str = "+";
 
 // Delimiters
-pub const COMMA: &'static str = ",";
-pub const SEMICOLON: &'static str = ";";
+pub const COMMA: &str = ",";
+pub const SEMICOLON: &str = ";";
 
-pub const LPAREN: &'static str = "(";
-pub const RPAREN: &'static str = ")";
-pub const LBRACE: &'static str = "{";
-pub const RBRACE: &'static str = "}";
+pub const LPAREN: &str = "(";
+pub const RPAREN: &str = ")";
+pub const LBRACE: &str = "{";
+pub const RBRACE: &str = "}";
 
 // Keywords
-pub const FUNCTION: &'static str = "FUNCTION";
-pub const LET: &'static str = "LET";
+pub const FUNCTION: &str = "FUNCTION";
+pub const LET: &str = "LET";

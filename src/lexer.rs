@@ -5,6 +5,7 @@ use crate::token;
 struct Lexer<'a> {
     input: &'a str,
     input_iter: Peekable<Chars<'a>>,
+    position: usize,
     ch: char,
 }
 
@@ -18,8 +19,9 @@ fn new_token(token_type: token::TokenType, ch: char) -> token::Token {
 impl<'a> Lexer<'a> {
     pub fn new(input: &'a str) -> Lexer<'a> {
         let mut lexer = Lexer {
-            input: input,
+            input,
             input_iter: input.chars().peekable(),
+            position: 0,
             ch: char::default(),
         };
         lexer.read_char();
@@ -27,11 +29,20 @@ impl<'a> Lexer<'a> {
     }
 
     pub fn read_char(&mut self) {
-        if let None = self.input_iter.peek() {
+        if self.input_iter.peek().is_none() {
             self.ch = char::default();
         } else {
             self.ch = self.input_iter.next().unwrap_or_default();
+            self.position += 1;
         }
+    }
+
+    pub fn read_identifier(&mut self) -> String {
+        let position = self.position;
+        while self.ch.is_alphabetic() {
+            self.read_char();
+        }
+        self.input[position..self.position].to_string()
     }
 
     pub fn next_token(&mut self) -> token::Token {
@@ -50,7 +61,14 @@ impl<'a> Lexer<'a> {
                 token.literal = char::default().to_string();
                 token.token_type = token::EOF;
             }
-            _other => {}
+            other => {
+                if other.is_alphabetic() {
+                    token.literal = self.read_identifier();
+                    return token;
+                } else {
+                    token = new_token(token::ILLEGAL, other)
+                }
+            }
         };
         self.read_char();
         token
