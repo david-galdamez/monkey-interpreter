@@ -2,7 +2,8 @@ use std::{char, iter::Peekable, str::Chars};
 
 use crate::token;
 
-struct Lexer<'a> {
+#[derive(Debug)]
+pub struct Lexer<'a> {
     input: &'a str,
     input_iter: Peekable<Chars<'a>>,
     position: usize,
@@ -59,7 +60,7 @@ impl<'a> Lexer<'a> {
     //same function as the one above
     fn read_number(&mut self) -> String {
         let position = self.position - 1;
-        while self.ch.is_digit(10) {
+        while self.ch.is_ascii_digit() {
             self.read_char();
         }
         self.input[position..self.position - 1].trim().to_string()
@@ -124,7 +125,7 @@ impl<'a> Lexer<'a> {
                     token.literal = self.read_identifier();
                     token.token_type = token::lookup_ident(&token.literal);
                     return token;
-                } else if other.is_digit(10) {
+                } else if other.is_ascii_digit() {
                     token.token_type = token::INT;
                     token.literal = self.read_number();
                     return token;

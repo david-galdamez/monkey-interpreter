@@ -1,8 +1,6 @@
-use std::collections::HashMap;
-
 pub type TokenType = &'static str;
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Token {
     pub token_type: TokenType,
     pub literal: String,
