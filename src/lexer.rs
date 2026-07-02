@@ -28,6 +28,8 @@ impl<'a> Lexer<'a> {
         lexer
     }
 
+    // we inspect if there is a valid character so we can consume it
+    // and go forward
     pub fn read_char(&mut self) {
         if self.input_iter.peek().is_none() {
             self.ch = char::default();
@@ -37,24 +39,36 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    pub fn peek_char(&mut self) -> String {
+        match self.input_iter.peek() {
+            Some(ch) => ch.to_string(),
+            None => char::default().to_string(),
+        }
+    }
+
+    // we use the - 1 because the position starts at 0 but the first read_char()
+    // advances forward
     fn read_identifier(&mut self) -> String {
         let position = self.position - 1;
         while self.ch.is_alphabetic() || self.ch == '_' {
             self.read_char();
         }
-        self.input[position..self.position].trim().to_string()
+        self.input[position..self.position - 1].trim().to_string()
     }
 
+    //same function as the one above
     fn read_number(&mut self) -> String {
         let position = self.position - 1;
-        while self.ch.is_numeric() {
+        while self.ch.is_digit(10) {
             self.read_char();
         }
-        self.input[position..self.position].trim().to_string()
+        self.input[position..self.position - 1].trim().to_string()
     }
 
     fn skip_whitespace(&mut self) {
-        if self.ch.is_whitespace() {
+        // important to do a while so we can skip all the
+        // whitespace
+        while self.ch.is_whitespace() {
             self.read_char();
         }
     }
@@ -65,12 +79,40 @@ impl<'a> Lexer<'a> {
         self.skip_whitespace();
 
         match self.ch {
-            '=' => token = new_token(token::ASSIGN, self.ch),
+            '=' => {
+                if self.peek_char() == "=" {
+                    let ch = self.ch;
+                    self.read_char();
+                    token = token::Token {
+                        token_type: token::EQ,
+                        literal: format!("{}{}", ch, self.ch),
+                    }
+                } else {
+                    token = new_token(token::ASSIGN, self.ch);
+                }
+            }
+            '+' => token = new_token(token::PLUS, self.ch),
+            '-' => token = new_token(token::MINUS, self.ch),
+            '!' => {
+                if self.peek_char() == "=" {
+                    let ch = self.ch;
+                    self.read_char();
+                    token = token::Token {
+                        token_type: token::NOT_EQ,
+                        literal: format!("{}{}", ch, self.ch),
+                    }
+                } else {
+                    token = new_token(token::BANG, self.ch);
+                }
+            }
+            '/' => token = new_token(token::SLASH, self.ch),
+            '*' => token = new_token(token::ASTERISK, self.ch),
+            '<' => token = new_token(token::LT, self.ch),
+            '>' => token = new_token(token::GT, self.ch),
             ';' => token = new_token(token::SEMICOLON, self.ch),
             '(' => token = new_token(token::LPAREN, self.ch),
             ')' => token = new_token(token::RPAREN, self.ch),
             ',' => token = new_token(token::COMMA, self.ch),
-            '+' => token = new_token(token::PLUS, self.ch),
             '{' => token = new_token(token::LBRACE, self.ch),
             '}' => token = new_token(token::RBRACE, self.ch),
             '\x00' => {
@@ -82,7 +124,7 @@ impl<'a> Lexer<'a> {
                     token.literal = self.read_identifier();
                     token.token_type = token::lookup_ident(&token.literal);
                     return token;
-                } else if other.is_numeric() {
+                } else if other.is_digit(10) {
                     token.token_type = token::INT;
                     token.literal = self.read_number();
                     return token;
@@ -116,6 +158,17 @@ mod tests {
         };
 
         let result = add(five, ten);
+        !-/*5;
+        5 < 10 > 5;
+
+        if (5 < 10) {
+            return true;
+        } else {
+            return false;
+        }
+
+        10 == 10;
+        10 != 9;
             ";
 
         let tests = vec![
@@ -196,7 +249,7 @@ mod tests {
                 expected_literal: ")".to_string(),
             },
             Expected {
-                expected_type: token::RBRACE,
+                expected_type: token::LBRACE,
                 expected_literal: "{".to_string(),
             },
             Expected {
@@ -216,7 +269,7 @@ mod tests {
                 expected_literal: ";".to_string(),
             },
             Expected {
-                expected_type: token::LBRACE,
+                expected_type: token::RBRACE,
                 expected_literal: "}".to_string(),
             },
             Expected {
@@ -264,17 +317,172 @@ mod tests {
                 expected_literal: ";".to_string(),
             },
             Expected {
+                expected_type: token::BANG,
+                expected_literal: "!".to_string(),
+            },
+            Expected {
+                expected_type: token::MINUS,
+                expected_literal: "-".to_string(),
+            },
+            Expected {
+                expected_type: token::SLASH,
+                expected_literal: "/".to_string(),
+            },
+            Expected {
+                expected_type: token::ASTERISK,
+                expected_literal: "*".to_string(),
+            },
+            Expected {
+                expected_type: token::INT,
+                expected_literal: "5".to_string(),
+            },
+            Expected {
+                expected_type: token::SEMICOLON,
+                expected_literal: ";".to_string(),
+            },
+            Expected {
+                expected_type: token::INT,
+                expected_literal: "5".to_string(),
+            },
+            Expected {
+                expected_type: token::LT,
+                expected_literal: "<".to_string(),
+            },
+            Expected {
+                expected_type: token::INT,
+                expected_literal: "10".to_string(),
+            },
+            Expected {
+                expected_type: token::GT,
+                expected_literal: ">".to_string(),
+            },
+            Expected {
+                expected_type: token::INT,
+                expected_literal: "5".to_string(),
+            },
+            Expected {
+                expected_type: token::SEMICOLON,
+                expected_literal: ";".to_string(),
+            },
+            Expected {
+                expected_type: token::IF,
+                expected_literal: "if".to_string(),
+            },
+            Expected {
+                expected_type: token::LPAREN,
+                expected_literal: "(".to_string(),
+            },
+            Expected {
+                expected_type: token::INT,
+                expected_literal: "5".to_string(),
+            },
+            Expected {
+                expected_type: token::LT,
+                expected_literal: "<".to_string(),
+            },
+            Expected {
+                expected_type: token::INT,
+                expected_literal: "10".to_string(),
+            },
+            Expected {
+                expected_type: token::RPAREN,
+                expected_literal: ")".to_string(),
+            },
+            Expected {
+                expected_type: token::LBRACE,
+                expected_literal: "{".to_string(),
+            },
+            Expected {
+                expected_type: token::RETURN,
+                expected_literal: "return".to_string(),
+            },
+            Expected {
+                expected_type: token::TRUE,
+                expected_literal: "true".to_string(),
+            },
+            Expected {
+                expected_type: token::SEMICOLON,
+                expected_literal: ";".to_string(),
+            },
+            Expected {
+                expected_type: token::RBRACE,
+                expected_literal: "}".to_string(),
+            },
+            Expected {
+                expected_type: token::ELSE,
+                expected_literal: "else".to_string(),
+            },
+            Expected {
+                expected_type: token::LBRACE,
+                expected_literal: "{".to_string(),
+            },
+            Expected {
+                expected_type: token::RETURN,
+                expected_literal: "return".to_string(),
+            },
+            Expected {
+                expected_type: token::FALSE,
+                expected_literal: "false".to_string(),
+            },
+            Expected {
+                expected_type: token::SEMICOLON,
+                expected_literal: ";".to_string(),
+            },
+            Expected {
+                expected_type: token::RBRACE,
+                expected_literal: "}".to_string(),
+            },
+            Expected {
+                expected_type: token::INT,
+                expected_literal: "10".to_string(),
+            },
+            Expected {
+                expected_type: token::EQ,
+                expected_literal: "==".to_string(),
+            },
+            Expected {
+                expected_type: token::INT,
+                expected_literal: "10".to_string(),
+            },
+            Expected {
+                expected_type: token::SEMICOLON,
+                expected_literal: ";".to_string(),
+            },
+            Expected {
+                expected_type: token::INT,
+                expected_literal: "10".to_string(),
+            },
+            Expected {
+                expected_type: token::NOT_EQ,
+                expected_literal: "!=".to_string(),
+            },
+            Expected {
+                expected_type: token::INT,
+                expected_literal: "9".to_string(),
+            },
+            Expected {
+                expected_type: token::SEMICOLON,
+                expected_literal: ";".to_string(),
+            },
+            Expected {
                 expected_type: token::EOF,
                 expected_literal: '\x00'.to_string(),
             },
         ];
 
         let mut lexer = Lexer::new(input);
-        for test_token in tests.iter() {
+        for (i, test_token) in tests.iter().enumerate() {
             let token = lexer.next_token();
-
-            assert_eq!(token.token_type, test_token.expected_type);
-            assert_eq!(token.literal, test_token.expected_literal);
+            assert_eq!(
+                token.token_type, test_token.expected_type,
+                "test[{}] token_type wrong",
+                i
+            );
+            assert_eq!(
+                token.literal, test_token.expected_literal,
+                "test[{}] literal wrong",
+                i
+            );
         }
     }
 }

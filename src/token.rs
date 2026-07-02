@@ -18,6 +18,14 @@ pub const INT: &str = "INT";
 // Operators
 pub const ASSIGN: &str = "=";
 pub const PLUS: &str = "+";
+pub const MINUS: &str = "-";
+pub const BANG: &str = "!";
+pub const ASTERISK: &str = "*";
+pub const SLASH: &str = "/";
+pub const EQ: &str = "==";
+pub const NOT_EQ: &str = "!=";
+pub const LT: &str = "<";
+pub const GT: &str = ">";
 
 // Delimiters
 pub const COMMA: &str = ",";
@@ -31,11 +39,22 @@ pub const RBRACE: &str = "}";
 // Keywords
 pub const FUNCTION: &str = "FUNCTION";
 pub const LET: &str = "LET";
+pub const IF: &str = "IF";
+pub const ELSE: &str = "ELSE";
+pub const RETURN: &str = "RETURN";
+pub const FALSE: &str = "FALSE";
+pub const TRUE: &str = "TRUE";
 
+// helper function so we can map identifiers
 pub fn lookup_ident(ident: &str) -> TokenType {
     match ident {
         "fn" => FUNCTION,
         "let" => LET,
+        "if" => IF,
+        "else" => ELSE,
+        "return" => RETURN,
+        "false" => FALSE,
+        "true" => TRUE,
         _other => IDENT,
     }
 }
