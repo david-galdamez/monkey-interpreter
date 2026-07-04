@@ -1,14 +1,21 @@
-use std::mem;
+use std::{collections::HashMap, mem};
 
 use crate::{
-    ast::{Identifier, LetStatement, Program, ReturnStatement, Statement},
+    ast::{Expression, Identifier, LetStatement, Program, ReturnStatement, Statement},
     lexer, token,
 };
+
+type prefix_parse_fn = fn() -> Box<dyn Expression>;
+type infix_parse_fn = fn(Box<dyn Expression>) -> Box<dyn Expression>;
 
 pub struct Parser<'a> {
     lex: lexer::Lexer<'a>,
     cur_token: token::Token,
     peek_token: token::Token,
+
+    prefix_parse_fns: HashMap<token::TokenType, prefix_parse_fn>,
+    infix_parse_fns: HashMap<token::TokenType, infix_parse_fn>,
+
     errors: Vec<String>,
 }
 
@@ -18,6 +25,10 @@ impl<'a> Parser<'a> {
             lex,
             cur_token: token::Token::default(),
             peek_token: token::Token::default(),
+
+            prefix_parse_fns: HashMap::new(),
+            infix_parse_fns: HashMap::new(),
+
             errors: Vec::new(),
         };
 
@@ -122,12 +133,20 @@ impl<'a> Parser<'a> {
             false
         }
     }
+
+    fn register_prefix(&mut self, tok: token::TokenType, func: prefix_parse_fn) {
+        self.prefix_parse_fns.insert(tok, func);
+    }
+
+    fn register_infix(&mut self, tok: token::TokenType, func: infix_parse_fn) {
+        self.infix_parse_fns.insert(tok, func);
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::{
-        ast::{LetStatement, Node, ReturnStatement, Statement},
+        ast::{ExpressionStatement, LetStatement, Node, ReturnStatement, Statement},
         lexer::Lexer,
         parser::Parser,
     };
@@ -260,5 +279,36 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn test_identifier_expression() {
+        let input = "foobar";
+
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer);
+
+        let program = parser.parse_program();
+        check_parse_errors(&parser);
+
+        assert!(program.is_some(), "parse_program() returned none");
+
+        let program = program.unwrap();
+        assert!(
+            program.statements.len() == 1,
+            "program.statements does not contain enough statements, got = {}",
+            program.statements.len()
+        );
+
+        let type_stmt = program.statements[0]
+            .as_any()
+            .downcast_ref::<ExpressionStatement>();
+
+        assert!(
+            type_stmt.is_some(),
+            "program.statement[0] is not an expression statement"
+        );
+
+        let stmt = type_stmt.unwrap();
     }
 }

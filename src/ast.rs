@@ -11,7 +11,7 @@ pub trait Statement: Node + fmt::Debug + fmt::Display {
     fn statement_node(&self);
 }
 
-trait Expression: Node + fmt::Debug + fmt::Display {
+pub trait Expression: Node + fmt::Debug + fmt::Display {
     fn expression_node(&self);
 }
 
@@ -58,9 +58,11 @@ impl fmt::Display for LetStatement {
         write!(f, "{}", self.name)?;
         write!(f, " = ")?;
 
-        if self.value {
+        if !self.value.value.is_empty() {
             write!(f, "{}", self.value)?;
         }
+
+        write!(f, ";")
     }
 }
 
@@ -84,6 +86,16 @@ pub struct ReturnStatement {
     pub return_value: Identifier,
 }
 
+impl fmt::Display for ReturnStatement {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} ", self.token_literal())?;
+        if !self.return_value.value.is_empty() {
+            write!(f, "{}", self.return_value)?;
+        }
+        write!(f, ";")
+    }
+}
+
 impl Node for ReturnStatement {
     fn token_literal(&self) -> &str {
         &self.token.literal
@@ -102,6 +114,15 @@ impl Statement for ReturnStatement {
 pub struct ExpressionStatement {
     token: token::Token,
     expression: Identifier,
+}
+
+impl fmt::Display for ExpressionStatement {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if !self.expression.value.is_empty() {
+            write!(f, "{}", self.expression)?;
+        }
+        Ok(())
+    }
 }
 
 impl Node for ExpressionStatement {
