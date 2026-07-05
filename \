@@ -58,8 +58,8 @@ impl fmt::Display for LetStatement {
         write!(f, "{}", self.name)?;
         write!(f, " = ")?;
 
-        if let Some(val) = &self.value {
-            write!(f, "{}", val)?;
+        if !self.value.value.is_empty() {
+            write!(f, "{}", self.value)?;
         }
 
         write!(f, ";")
@@ -89,8 +89,8 @@ pub struct ReturnStatement {
 impl fmt::Display for ReturnStatement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{} ", self.token_literal())?;
-        if let Some(val) = &self.return_value {
-            write!(f, "{}", val)?;
+        if !self.return_value.value.is_empty() {
+            write!(f, "{}", self.return_value)?;
         }
         write!(f, ";")
     }
@@ -118,8 +118,8 @@ pub struct ExpressionStatement {
 
 impl fmt::Display for ExpressionStatement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let Some(val) = &self.expression {
-            write!(f, "{}", val)?;
+        if !self.expression.value.is_empty() {
+            write!(f, "{}", self.expression)?;
         }
         Ok(())
     }
