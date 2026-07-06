@@ -190,3 +190,65 @@ impl Node for IntegerLiteral {
 impl Expression for IntegerLiteral {
     fn expression_node(&self) {}
 }
+
+#[derive(Debug, Default)]
+pub struct PrefixExpression {
+    pub token: token::Token,
+    pub operator: String,
+    pub right: Option<Box<dyn Expression>>,
+}
+
+impl fmt::Display for PrefixExpression {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "(")?;
+        write!(f, "{}", self.operator)?;
+        write!(f, "{:#?}", self.right)?;
+        write!(f, ")")
+    }
+}
+
+impl Node for PrefixExpression {
+    fn token_literal(&self) -> &str {
+        &self.token.literal
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+impl Expression for PrefixExpression {
+    fn expression_node(&self) {}
+}
+
+#[derive(Debug, Default)]
+pub struct InfixExpression {
+    pub token: token::Token,
+    pub left: Option<Box<dyn Expression>>,
+    pub operator: String,
+    pub right: Option<Box<dyn Expression>>,
+}
+
+impl fmt::Display for InfixExpression {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "(")?;
+        write!(f, "{:#?}", self.left)?;
+        write!(f, "{}", self.operator)?;
+        write!(f, "{:#?}", self.right)?;
+        write!(f, ")")
+    }
+}
+
+impl Node for InfixExpression {
+    fn token_literal(&self) -> &str {
+        &self.token.literal
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+impl Expression for InfixExpression {
+    fn expression_node(&self) {}
+}
