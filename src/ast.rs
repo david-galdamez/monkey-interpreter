@@ -202,7 +202,7 @@ impl fmt::Display for PrefixExpression {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "(")?;
         write!(f, "{}", self.operator)?;
-        write!(f, "{:#?}", self.right)?;
+        write!(f, "{}", self.right.as_ref().unwrap())?;
         write!(f, ")")
     }
 }
@@ -232,9 +232,9 @@ pub struct InfixExpression {
 impl fmt::Display for InfixExpression {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "(")?;
-        write!(f, "{:#?}", self.left)?;
-        write!(f, "{}", self.operator)?;
-        write!(f, "{:#?}", self.right)?;
+        write!(f, "{} ", self.left.as_ref().unwrap())?;
+        write!(f, "{} ", self.operator)?;
+        write!(f, "{}", self.right.as_ref().unwrap())?;
         write!(f, ")")
     }
 }
@@ -250,5 +250,132 @@ impl Node for InfixExpression {
 }
 
 impl Expression for InfixExpression {
+    fn expression_node(&self) {}
+}
+
+#[derive(Debug, Default)]
+pub struct Boolean {
+    pub token: token::Token,
+    pub value: bool,
+}
+
+impl fmt::Display for Boolean {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.value)
+    }
+}
+
+impl Node for Boolean {
+    fn token_literal(&self) -> &str {
+        &self.token.literal
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+impl Expression for Boolean {
+    fn expression_node(&self) {}
+}
+
+#[derive(Debug, Default)]
+pub struct IfExpression {
+    pub token: token::Token,
+    pub condition: Option<Box<dyn Expression>>,
+    pub consequence: Option<BlockStatement>,
+    pub alternative: Option<BlockStatement>,
+}
+
+impl fmt::Display for IfExpression {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "if")?;
+        write!(f, "{}", self.condition.as_ref().unwrap())?;
+        write!(f, " ")?;
+        write!(f, "{}", self.consequence.as_ref().unwrap())?;
+
+        if self.alternative.is_some() {
+            write!(f, "else ")?;
+            write!(f, "{}", self.alternative.as_ref().unwrap())?;
+        }
+
+        Ok(())
+    }
+}
+
+impl Node for IfExpression {
+    fn token_literal(&self) -> &str {
+        &self.token.literal
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+impl Expression for IfExpression {
+    fn expression_node(&self) {}
+}
+
+#[derive(Debug, Default)]
+pub struct BlockStatement {
+    pub token: token::Token,
+    pub statements: Vec<Box<dyn Statement>>,
+}
+
+impl fmt::Display for BlockStatement {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for stmt in &self.statements {
+            write!(f, "{}", stmt)?;
+        }
+
+        Ok(())
+    }
+}
+
+impl Node for BlockStatement {
+    fn token_literal(&self) -> &str {
+        &self.token.literal
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+impl Statement for BlockStatement {
+    fn statement_node(&self) {}
+}
+
+#[derive(Debug, Default)]
+pub struct FunctionLiteral {
+    pub token: token::Token,
+    pub parameters: Vec<Identifier>,
+    pub body: Option<BlockStatement>,
+}
+
+impl fmt::Display for FunctionLiteral {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let params: Vec<String> = self.parameters.iter().map(|p| format!("{}", p)).collect();
+
+        write!(f, "{}", self.token_literal())?;
+        write!(f, "(")?;
+        write!(f, "{}", params.join(", "))?;
+        write!(f, ")")?;
+        write!(f, "{}", self.body.as_ref().unwrap())
+    }
+}
+
+impl Node for FunctionLiteral {
+    fn token_literal(&self) -> &str {
+        &self.token.literal
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+impl Expression for FunctionLiteral {
     fn expression_node(&self) {}
 }

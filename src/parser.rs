@@ -2,8 +2,9 @@ use std::{collections::HashMap, mem};
 
 use crate::{
     ast::{
-        Expression, ExpressionStatement, Identifier, InfixExpression, IntegerLiteral, LetStatement,
-        PrefixExpression, Program, ReturnStatement, Statement,
+        BlockStatement, Boolean, Expression, ExpressionStatement, FunctionLiteral, Identifier,
+        IfExpression, InfixExpression, IntegerLiteral, LetStatement, PrefixExpression, Program,
+        ReturnStatement, Statement,
     },
     lexer, token,
 };
@@ -65,6 +66,11 @@ impl<'a> Parser<'a> {
         parser.register_prefix(token::INT, Parser::parse_integer_literal);
         parser.register_prefix(token::BANG, Parser::parse_prefix_expression);
         parser.register_prefix(token::MINUS, Parser::parse_prefix_expression);
+        parser.register_prefix(token::TRUE, Parser::parse_boolean);
+        parser.register_prefix(token::FALSE, Parser::parse_boolean);
+        parser.register_prefix(token::LPAREN, Parser::parse_grouped_expression);
+        parser.register_prefix(token::IF, Parser::parse_if_expression);
+        parser.register_prefix(token::FUNCTION, Parser::parse_function_literal);
 
         // register infixes
         parser.register_infix(token::PLUS, Parser::parse_infix_expression);
@@ -176,6 +182,57 @@ impl<'a> Parser<'a> {
         Some(Box::new(stmt))
     }
 
+    fn parse_block_statement(&mut self) -> Option<BlockStatement> {
+        let mut block = BlockStatement {
+            token: self.cur_token.clone(),
+            ..Default::default()
+        };
+
+        self.next_token();
+
+        while !self.cur_token_is(token::RBRACE) && !self.cur_token_is(token::EOF) {
+            if let Some(stmt) = self.parse_statement() {
+                block.statements.push(stmt);
+            }
+            self.next_token();
+        }
+
+        Some(block)
+    }
+
+    fn parse_function_parameters(&mut self) -> Vec<Identifier> {
+        let mut identifiers = Vec::new();
+
+        if self.peek_token_is(token::RPAREN) {
+            self.next_token();
+            return identifiers;
+        }
+
+        self.next_token();
+
+        let ident = Identifier {
+            token: self.cur_token.clone(),
+            value: self.cur_token.literal.clone(),
+        };
+        identifiers.push(ident);
+
+        while self.peek_token_is(token::COMMA) {
+            self.next_token();
+            self.next_token();
+            let ident = Identifier {
+                token: self.cur_token.clone(),
+                value: self.cur_token.literal.clone(),
+            };
+            identifiers.push(ident);
+        }
+
+        if !self.expect_peek(token::RPAREN) {
+            return Vec::new();
+        }
+
+        identifiers
+    }
+
     // Expressions
     fn parse_identifier(parser: &mut Parser) -> Option<Box<dyn Expression>> {
         Some(Box::new(Identifier {
@@ -218,6 +275,84 @@ impl<'a> Parser<'a> {
 
         Some(Box::new(expression))
     }
+
+    fn parse_boolean(parser: &mut Parser) -> Option<Box<dyn Expression>> {
+        Some(Box::new(Boolean {
+            token: parser.cur_token.clone(),
+            value: parser.cur_token_is(token::TRUE),
+        }))
+    }
+
+    fn parse_grouped_expression(parser: &mut Parser) -> Option<Box<dyn Expression>> {
+        parser.next_token();
+
+        let exp = parser.parse_expression(ExpressionConstants::LOWEST);
+
+        if !parser.expect_peek(token::RPAREN) {
+            return None;
+        }
+
+        exp
+    }
+
+    fn parse_if_expression(parser: &mut Parser) -> Option<Box<dyn Expression>> {
+        let mut exp = IfExpression {
+            token: parser.cur_token.clone(),
+            ..Default::default()
+        };
+
+        if !parser.expect_peek(token::LPAREN) {
+            return None;
+        }
+
+        parser.next_token();
+        exp.condition = parser.parse_expression(ExpressionConstants::LOWEST);
+
+        if !parser.expect_peek(token::RPAREN) {
+            return None;
+        }
+
+        if !parser.expect_peek(token::LBRACE) {
+            return None;
+        }
+
+        exp.consequence = parser.parse_block_statement();
+
+        if parser.peek_token_is(token::ELSE) {
+            parser.next_token();
+
+            if !parser.peek_token_is(token::LBRACE) {
+                return None;
+            }
+
+            exp.alternative = parser.parse_block_statement();
+        }
+
+        Some(Box::new(exp))
+    }
+
+    fn parse_function_literal(parser: &mut Parser) -> Option<Box<dyn Expression>> {
+        let mut lit = FunctionLiteral {
+            token: parser.cur_token.clone(),
+            ..Default::default()
+        };
+
+        if !parser.expect_peek(token::LPAREN) {
+            return None;
+        }
+
+        lit.parameters = parser.parse_function_parameters();
+
+        if !parser.expect_peek(token::LBRACE) {
+            return None;
+        }
+
+        lit.body = parser.parse_block_statement();
+
+        Some(Box::new(lit))
+    }
+
+    // infixes
 
     fn parse_infix_expression(
         parser: &mut Parser,
@@ -304,10 +439,13 @@ impl<'a> Parser<'a> {
 
 #[cfg(test)]
 mod tests {
+    use std::any::Any;
+
     use crate::{
         ast::{
-            Expression, ExpressionStatement, Identifier, InfixExpression, IntegerLiteral,
-            LetStatement, Node, PrefixExpression, ReturnStatement, Statement,
+            Boolean, Expression, ExpressionStatement, FunctionLiteral, Identifier, IfExpression,
+            InfixExpression, IntegerLiteral, LetStatement, Node, PrefixExpression, ReturnStatement,
+            Statement,
         },
         lexer::Lexer,
         parser::Parser,
@@ -563,7 +701,7 @@ mod tests {
     struct PrefixTest<'a> {
         input: &'a str,
         operator: &'a str,
-        integer_value: i64,
+        value: &'a dyn Any,
     }
 
     #[test]
@@ -572,12 +710,22 @@ mod tests {
             PrefixTest {
                 input: "!5;",
                 operator: "!",
-                integer_value: 5,
+                value: &5,
             },
             PrefixTest {
                 input: "-15;",
                 operator: "-",
-                integer_value: 15,
+                value: &15,
+            },
+            PrefixTest {
+                input: "!true;",
+                operator: "!",
+                value: &true,
+            },
+            PrefixTest {
+                input: "!false;",
+                operator: "!",
+                value: &false,
             },
         ];
 
@@ -630,53 +778,17 @@ mod tests {
                 exp.operator
             );
 
-            if !test_integer_literal_helper(&exp.right, test.integer_value) {
+            if !test_literal_expression(&exp.right, test.value) {
                 return;
             }
         }
     }
 
-    fn test_integer_literal_helper(
-        integer_literal: &Option<Box<dyn Expression>>,
-        value: i64,
-    ) -> bool {
-        match integer_literal {
-            Some(exp) => {
-                let type_exp = exp.as_any().downcast_ref::<IntegerLiteral>();
-
-                assert!(
-                    type_exp.is_some(),
-                    "integer_literal is not an IntegerLiteral, got = {:#?}",
-                    exp
-                );
-
-                let integer = type_exp.unwrap();
-
-                assert_eq!(
-                    integer.value, value,
-                    "integ.Value not {}, got = {}",
-                    value, integer.value
-                );
-
-                assert_eq!(
-                    integer.token_literal(),
-                    format!("{}", value),
-                    "integ.token_literal not {}, got = {}",
-                    value,
-                    integer.token_literal()
-                );
-
-                true
-            }
-            None => false,
-        }
-    }
-
     struct InfixTests<'a> {
         input: &'a str,
-        left_val: i64,
+        left_val: &'a dyn Any,
         operator: &'a str,
-        right_val: i64,
+        right_val: &'a dyn Any,
     }
 
     #[test]
@@ -684,51 +796,69 @@ mod tests {
         let infix_test = vec![
             InfixTests {
                 input: "5 + 5;",
-                left_val: 5,
+                left_val: &5,
                 operator: "+",
-                right_val: 5,
+                right_val: &5,
             },
             InfixTests {
                 input: "5 - 5;",
-                left_val: 5,
+                left_val: &5,
                 operator: "-",
-                right_val: 5,
+                right_val: &5,
             },
             InfixTests {
                 input: "5 * 5;",
-                left_val: 5,
+                left_val: &5,
                 operator: "*",
-                right_val: 5,
+                right_val: &5,
             },
             InfixTests {
                 input: "5 / 5;",
-                left_val: 5,
+                left_val: &5,
                 operator: "/",
-                right_val: 5,
+                right_val: &5,
             },
             InfixTests {
                 input: "5 > 5;",
-                left_val: 5,
+                left_val: &5,
                 operator: ">",
-                right_val: 5,
+                right_val: &5,
             },
             InfixTests {
                 input: "5 < 5;",
-                left_val: 5,
+                left_val: &5,
                 operator: "<",
-                right_val: 5,
+                right_val: &5,
             },
             InfixTests {
                 input: "5 == 5;",
-                left_val: 5,
+                left_val: &5,
                 operator: "==",
-                right_val: 5,
+                right_val: &5,
             },
             InfixTests {
                 input: "5 != 5;",
-                left_val: 5,
+                left_val: &5,
                 operator: "!=",
-                right_val: 5,
+                right_val: &5,
+            },
+            InfixTests {
+                input: "true == true",
+                left_val: &true,
+                operator: "==",
+                right_val: &true,
+            },
+            InfixTests {
+                input: "true != false",
+                left_val: &true,
+                operator: "!=",
+                right_val: &false,
+            },
+            InfixTests {
+                input: "false == false",
+                left_val: &false,
+                operator: "==",
+                right_val: &false,
             },
         ];
 
@@ -774,7 +904,7 @@ mod tests {
             );
             let exp = exp.unwrap();
 
-            if !test_integer_literal_helper(&exp.left, test.left_val) {
+            if !test_literal_expression(&exp.left, &test.left_val) {
                 return;
             }
 
@@ -785,9 +915,442 @@ mod tests {
                 exp.operator
             );
 
-            if !test_integer_literal_helper(&exp.right, test.right_val) {
+            if !test_literal_expression(&exp.right, &test.right_val) {
                 return;
             }
         }
+    }
+
+    #[test]
+    fn test_boolean_expression() {
+        let input = "true;";
+
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer);
+
+        let program = parser.parse_program();
+        check_parse_errors(&parser);
+
+        assert!(program.is_some(), "parse_program() returned none");
+
+        let program = program.unwrap();
+        assert!(
+            program.statements.len() == 1,
+            "program.statements does not contain enough statements, got = {}",
+            program.statements.len()
+        );
+
+        let type_stmt = program.statements[0]
+            .as_any()
+            .downcast_ref::<ExpressionStatement>();
+
+        assert!(
+            type_stmt.is_some(),
+            "program.statement[0] is not an expression statement"
+        );
+
+        let stmt = type_stmt.unwrap();
+
+        let exp = match &stmt.expression {
+            Some(expression) => {
+                let exp = expression.as_any();
+                exp.downcast_ref::<Boolean>()
+            }
+            None => {
+                panic!("no expression found");
+            }
+        };
+
+        assert!(
+            exp.is_some(),
+            "statement.expression is not an identifier expression"
+        );
+        let exp = exp.unwrap();
+
+        assert!(exp.value, "ident.value not true, got = {}", exp.value);
+
+        assert!(
+            exp.token_literal() == "true",
+            "ident.token_literal not true, got = {}",
+            exp.value
+        );
+    }
+
+    struct PrecedenceTest<'a> {
+        input: &'a str,
+        expected: &'a str,
+    }
+
+    #[test]
+    fn test_operator_precedence_parsing() {
+        let tests = vec![
+            PrecedenceTest {
+                input: "true",
+                expected: "true",
+            },
+            PrecedenceTest {
+                input: "false",
+                expected: "false",
+            },
+            PrecedenceTest {
+                input: "3 > 5 == false",
+                expected: "((3 > 5) == false)",
+            },
+            PrecedenceTest {
+                input: "3 < 5 == true",
+                expected: "((3 < 5) == true)",
+            },
+            PrecedenceTest {
+                input: "1 + (2 + 3) + 4",
+                expected: "((1 + (2 + 3)) + 4)",
+            },
+            PrecedenceTest {
+                input: "(5 + 5) * 2",
+                expected: "((5 + 5) * 2)",
+            },
+            PrecedenceTest {
+                input: "2 / (5 + 5)",
+                expected: "(2 / (5 + 5))",
+            },
+            PrecedenceTest {
+                input: "-(5 + 5)",
+                expected: "(-(5 + 5))",
+            },
+            PrecedenceTest {
+                input: "!(true == true)",
+                expected: "(!(true == true))",
+            },
+        ];
+
+        for test in tests {
+            let lexer = Lexer::new(test.input);
+            let mut parser = Parser::new(lexer);
+            let program = parser.parse_program();
+            check_parse_errors(&parser);
+
+            assert!(program.is_some(), "parse_program() returned none");
+
+            let program = program.unwrap();
+
+            let actual = format!("{}", program);
+            assert_eq!(
+                actual, test.expected,
+                "expected = {}, got = {}",
+                test.expected, actual
+            )
+        }
+    }
+
+    #[test]
+    fn test_if_expressions() {
+        let input = "if (x < y) { x }";
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer);
+        let program = parser.parse_program();
+        check_parse_errors(&parser);
+
+        assert!(program.is_some(), "parse_program() returned none");
+
+        let program = program.unwrap();
+
+        assert!(
+            program.statements.len() == 1,
+            "program.statements does not contain enough statements, got = {}",
+            program.statements.len()
+        );
+
+        let type_stmt = program.statements[0]
+            .as_any()
+            .downcast_ref::<ExpressionStatement>();
+
+        assert!(
+            type_stmt.is_some(),
+            "program.statement[0] is not an expression statement"
+        );
+
+        let stmt = type_stmt.unwrap();
+
+        let exp = match &stmt.expression {
+            Some(expression) => {
+                let exp = expression.as_any();
+                exp.downcast_ref::<IfExpression>()
+            }
+            None => {
+                panic!("no expression found");
+            }
+        };
+
+        assert!(
+            exp.is_some(),
+            "statement.expression is not an IfExpression expression"
+        );
+        let exp = exp.unwrap();
+
+        if !test_infix_expression(&exp.condition, &"x", "<", &"y") {
+            return;
+        }
+
+        assert!(
+            exp.consequence.as_ref().unwrap().statements.len() == 1,
+            "exp.consequence.statements does not contain enough statements, got = {}",
+            program.statements.len()
+        );
+
+        let consequence = exp.consequence.as_ref().unwrap().statements[0]
+            .as_any()
+            .downcast_ref::<ExpressionStatement>();
+
+        assert!(
+            type_stmt.is_some(),
+            "exp.consequence.statement[0] is not an expression statement"
+        );
+
+        let consequence = consequence.unwrap();
+
+        if !test_identifier(&consequence.expression, "x") {
+            return;
+        }
+
+        assert!(
+            exp.alternative.is_none(),
+            "exp.alternative.statements was not none, got = {:#?}",
+            exp.alternative
+        );
+    }
+
+    #[test]
+    fn test_function_literal_parsing() {
+        let input = "fn(x, y) { x + y; }";
+
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer);
+        let program = parser.parse_program();
+        check_parse_errors(&parser);
+
+        assert!(program.is_some(), "parse_program() returned none");
+
+        let program = program.unwrap();
+
+        assert!(
+            program.statements.len() == 1,
+            "program.statements does not contain enough statements, got = {}",
+            program.statements.len()
+        );
+
+        let type_stmt = program.statements[0]
+            .as_any()
+            .downcast_ref::<ExpressionStatement>();
+
+        assert!(
+            type_stmt.is_some(),
+            "program.statement[0] is not an expression statement"
+        );
+
+        let stmt = type_stmt.unwrap();
+
+        let func = match &stmt.expression {
+            Some(expression) => {
+                let exp = expression.as_any();
+                exp.downcast_ref::<FunctionLiteral>()
+            }
+            None => {
+                panic!("no expression found");
+            }
+        };
+
+        assert!(func.is_some(), "func is not an FunctionLiteral expression");
+        let func = func.unwrap();
+
+        assert!(
+            func.parameters.len() == 2,
+            "function literal parameters wrong, want 2, got = {}",
+            func.parameters.len()
+        );
+
+        test_literal_expression(&Some(Box::new(func.parameters[0].clone())), &"x");
+        test_literal_expression(&Some(Box::new(func.parameters[1].clone())), &"y");
+
+        assert!(
+            func.body.as_ref().unwrap().statements.len() == 1,
+            "function.body.statements has not 1 statement, got = {}",
+            func.body.as_ref().unwrap().statements.len()
+        );
+
+        let body_stmt = func
+            .body
+            .as_ref()
+            .unwrap()
+            .statements
+            .first()
+            .unwrap()
+            .as_any()
+            .downcast_ref::<ExpressionStatement>();
+
+        assert!(
+            body_stmt.is_some(),
+            "function body stmt is not an ExpressionStatement"
+        );
+
+        let body_stmt = body_stmt.unwrap();
+
+        assert!(test_infix_expression(
+            &body_stmt.expression,
+            &"x",
+            "+",
+            &"y"
+        ))
+    }
+
+    // HELPERS FOR THE TESTS
+
+    fn test_literal_expression(exp: &Option<Box<dyn Expression>>, expected: &dyn Any) -> bool {
+        if expected.is::<i64>() {
+            return test_integer_literal_helper(&exp, expected.downcast_ref::<i64>().unwrap());
+        } else if expected.is::<&str>() {
+            return test_identifier(exp, expected.downcast_ref::<&str>().unwrap());
+        } else if expected.is::<bool>() {
+            return test_boolean_literal(exp, expected.downcast_ref::<bool>().unwrap());
+        } else {
+            eprintln!("type of exp not handled, got = {:#?}", exp);
+            return false;
+        }
+    }
+
+    fn test_identifier(exp: &Option<Box<dyn Expression>>, value: &str) -> bool {
+        let exp = match &exp {
+            Some(expression) => {
+                let exp = expression.as_any();
+                exp.downcast_ref::<Identifier>()
+            }
+            None => {
+                panic!("no expression found");
+            }
+        };
+
+        assert!(
+            exp.is_some(),
+            "statement.expression is not an identifier expression"
+        );
+        let exp = exp.unwrap();
+
+        if exp.value != value {
+            eprintln!("ident.value not {}, got = {}", value, exp.value);
+            return false;
+        }
+
+        if exp.token_literal() != value {
+            eprintln!("ident.token_literal not {}, got = {}", value, exp.value);
+            return false;
+        }
+
+        true
+    }
+
+    fn test_integer_literal_helper(
+        integer_literal: &Option<Box<dyn Expression>>,
+        value: &i64,
+    ) -> bool {
+        match integer_literal {
+            Some(exp) => {
+                let type_exp = exp.as_any().downcast_ref::<IntegerLiteral>();
+
+                assert!(
+                    type_exp.is_some(),
+                    "integer_literal is not an IntegerLiteral, got = {:#?}",
+                    exp
+                );
+
+                let integer = type_exp.unwrap();
+
+                if integer.value != *value {
+                    eprintln!("integ.Value not {}, got = {}", value, integer.value);
+                    return false;
+                }
+
+                if integer.token_literal() != format!("{}", value) {
+                    eprintln!(
+                        "integ.token_literal not {}, got = {}",
+                        value,
+                        integer.token_literal()
+                    );
+                    return false;
+                }
+
+                true
+            }
+            None => false,
+        }
+    }
+
+    fn test_infix_expression(
+        exp: &Option<Box<dyn Expression>>,
+        left: &dyn Any,
+        operator: &str,
+        right: &dyn Any,
+    ) -> bool {
+        let exp = match &exp {
+            Some(expression) => {
+                let exp = expression.as_any();
+                exp.downcast_ref::<InfixExpression>()
+            }
+            None => {
+                panic!("no expression found");
+            }
+        };
+
+        assert!(
+            exp.is_some(),
+            "statement.expression is not an InfixExpression expression"
+        );
+        let exp = exp.unwrap();
+
+        if !test_literal_expression(&exp.left, left) {
+            return false;
+        }
+
+        if exp.operator != operator {
+            eprintln!("exp.operator is not {}, got = {}", operator, exp.operator);
+            return false;
+        }
+
+        if !test_literal_expression(&exp.right, right) {
+            return false;
+        }
+
+        true
+    }
+
+    fn test_boolean_literal(exp: &Option<Box<dyn Expression>>, value: &bool) -> bool {
+        let exp = match &exp {
+            Some(expression) => {
+                let exp = expression.as_any();
+                exp.downcast_ref::<Boolean>()
+            }
+            None => {
+                panic!("no expression found");
+            }
+        };
+
+        assert!(
+            exp.is_some(),
+            "statement.expression is not an InfixExpression expression"
+        );
+        let exp = exp.unwrap();
+
+        if exp.value != *value {
+            eprintln!("exp.operator is not {}, got = {}", value, exp.value);
+            return false;
+        }
+
+        if exp.token_literal() != format!("{}", value) {
+            eprintln!(
+                "exp.token_literal not {}, got = {}",
+                value,
+                exp.token_literal()
+            );
+            return false;
+        }
+
+        true
     }
 }
