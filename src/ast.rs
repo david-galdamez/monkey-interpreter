@@ -379,3 +379,35 @@ impl Node for FunctionLiteral {
 impl Expression for FunctionLiteral {
     fn expression_node(&self) {}
 }
+
+#[derive(Debug, Default)]
+pub struct CallExpression {
+    pub token: token::Token,
+    pub function: Option<Box<dyn Expression>>,
+    pub arguments: Vec<Box<dyn Expression>>,
+}
+
+impl fmt::Display for CallExpression {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let args: Vec<String> = self.arguments.iter().map(|p| format!("{}", p)).collect();
+
+        write!(f, "{}", self.function.as_ref().unwrap())?;
+        write!(f, "(")?;
+        write!(f, "{}", args.join(", "))?;
+        write!(f, ")")
+    }
+}
+
+impl Node for CallExpression {
+    fn token_literal(&self) -> &str {
+        &self.token.literal
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+impl Expression for CallExpression {
+    fn expression_node(&self) {}
+}
