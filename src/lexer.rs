@@ -36,8 +36,8 @@ impl<'a> Lexer<'a> {
             self.ch = char::default();
         } else {
             self.ch = self.input_iter.next().unwrap_or_default();
-            self.position += 1;
         }
+        self.position += 1;
     }
 
     pub fn peek_char(&mut self) -> String {

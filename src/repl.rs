@@ -1,6 +1,6 @@
 use std::io::{self, Write};
 
-use crate::{lexer, token};
+use crate::{lexer, parser};
 
 pub fn start() {
     loop {
@@ -13,15 +13,26 @@ pub fn start() {
             Err(_) => return,
         }
 
-        let mut lex = lexer::Lexer::new(&input);
-
-        loop {
-            let tok = lex.next_token();
-            if tok.token_type == token::EOF {
-                break;
+        let lex = lexer::Lexer::new(&input);
+        let mut parser = parser::Parser::new(lex);
+        let program = match parser.parse_program() {
+            Some(p) => p,
+            None => {
+                eprintln!("error getting program");
+                return;
             }
+        };
 
-            println!("{:#?}", tok);
+        if parser.errors().len() != 0 {
+            print_parser_errors(parser.errors());
         }
+
+        println!("{}", program);
+    }
+}
+
+fn print_parser_errors(errors: &[String]) {
+    for err in errors {
+        eprintln!("\t{}", err);
     }
 }
