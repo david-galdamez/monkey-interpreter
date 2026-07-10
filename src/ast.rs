@@ -13,6 +13,7 @@ pub trait Statement: Node + fmt::Debug + fmt::Display {
 
 pub trait Expression: Node + fmt::Debug + fmt::Display {
     fn expression_node(&self);
+    fn as_node(self: Box<Self>) -> Box<dyn Node>;
 }
 
 #[derive(Debug, Default)]
@@ -163,6 +164,9 @@ impl Node for Identifier {
 
 impl Expression for Identifier {
     fn expression_node(&self) {}
+    fn as_node(self: Box<Self>) -> Box<dyn Node> {
+        self
+    }
 }
 
 #[derive(Debug, Default, Clone)]
@@ -189,6 +193,9 @@ impl Node for IntegerLiteral {
 
 impl Expression for IntegerLiteral {
     fn expression_node(&self) {}
+    fn as_node(self: Box<Self>) -> Box<dyn Node> {
+        self
+    }
 }
 
 #[derive(Debug, Default)]
@@ -219,6 +226,9 @@ impl Node for PrefixExpression {
 
 impl Expression for PrefixExpression {
     fn expression_node(&self) {}
+    fn as_node(self: Box<Self>) -> Box<dyn Node> {
+        self
+    }
 }
 
 #[derive(Debug, Default)]
@@ -251,6 +261,9 @@ impl Node for InfixExpression {
 
 impl Expression for InfixExpression {
     fn expression_node(&self) {}
+    fn as_node(self: Box<Self>) -> Box<dyn Node> {
+        self
+    }
 }
 
 #[derive(Debug, Default)]
@@ -277,6 +290,9 @@ impl Node for Boolean {
 
 impl Expression for Boolean {
     fn expression_node(&self) {}
+    fn as_node(self: Box<Self>) -> Box<dyn Node> {
+        self
+    }
 }
 
 #[derive(Debug, Default)]
@@ -314,6 +330,9 @@ impl Node for IfExpression {
 }
 
 impl Expression for IfExpression {
+    fn as_node(self: Box<Self>) -> Box<dyn Node> {
+        self
+    }
     fn expression_node(&self) {}
 }
 
@@ -378,6 +397,9 @@ impl Node for FunctionLiteral {
 
 impl Expression for FunctionLiteral {
     fn expression_node(&self) {}
+    fn as_node(self: Box<Self>) -> Box<dyn Node> {
+        self
+    }
 }
 
 #[derive(Debug, Default)]
@@ -410,4 +432,7 @@ impl Node for CallExpression {
 
 impl Expression for CallExpression {
     fn expression_node(&self) {}
+    fn as_node(self: Box<Self>) -> Box<dyn Node> {
+        self
+    }
 }
