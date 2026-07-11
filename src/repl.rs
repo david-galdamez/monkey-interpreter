@@ -1,6 +1,6 @@
 use std::io::{self, Write};
 
-use crate::{lexer, parser};
+use crate::{evaluator, lexer, parser};
 
 pub fn start() {
     loop {
@@ -25,9 +25,12 @@ pub fn start() {
 
         if parser.errors().len() != 0 {
             print_parser_errors(parser.errors());
+            continue;
         }
 
-        println!("{}", program);
+        if let Some(eval) = evaluator::eval(&program) {
+            println!("{}", eval.inspect());
+        }
     }
 }
 
