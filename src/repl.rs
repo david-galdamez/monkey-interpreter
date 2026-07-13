@@ -28,9 +28,8 @@ pub fn start() {
             continue;
         }
 
-        if let Some(eval) = evaluator::eval(&program) {
-            println!("{}", eval.inspect());
-        }
+        let eval = evaluator::eval(&program);
+        println!("{}", eval.inspect());
     }
 }
 

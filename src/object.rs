@@ -8,9 +8,9 @@ pub trait Object {
     fn as_any(&self) -> &dyn Any;
 }
 
-const INTEGER_OBJ: &str = "INTEGER";
-const BOOLEAN_OBJ: &str = "BOOLEAN";
-const NULL_OBJ: &str = "NULL";
+pub const INTEGER_OBJ: &str = "INTEGER";
+pub const BOOLEAN_OBJ: &str = "BOOLEAN";
+pub const NULL_OBJ: &str = "NULL";
 
 pub struct Integer {
     pub value: i64,
@@ -30,8 +30,8 @@ impl Object for Integer {
     }
 }
 
-struct Boolean {
-    value: bool,
+pub struct Boolean {
+    pub value: bool,
 }
 
 impl Object for Boolean {
@@ -48,7 +48,7 @@ impl Object for Boolean {
     }
 }
 
-struct Null;
+pub struct Null;
 
 impl Object for Null {
     fn inspect(&self) -> String {
