@@ -4,12 +4,10 @@ pub fn eval(node: &dyn ast::Node) -> Box<dyn object::Object> {
     if let Some(node) = node.as_any().downcast_ref::<ast::Program>() {
         return eval_statement(&node.statements);
     } else if let Some(node) = node.as_any().downcast_ref::<ast::ExpressionStatement>() {
-        return eval(
-            node.expression
-                .as_ref()
-                .expect("node expression not found")
-                .as_ref(),
-        );
+        return match &node.expression {
+            Some(expr) => eval(expr.as_ref()),
+            None => Box::new(object::Null {}),
+        };
     } else if let Some(node) = node.as_any().downcast_ref::<ast::IntegerLiteral>() {
         return Box::new(object::Integer { value: node.value });
     } else if let Some(node) = node.as_any().downcast_ref::<ast::Boolean>() {
@@ -37,6 +35,13 @@ pub fn eval(node: &dyn ast::Node) -> Box<dyn object::Object> {
                 .as_ref(),
         );
         return eval_infix_expression(&node.operator, left, right);
+    } else if let Some(node) = node.as_any().downcast_ref::<ast::BlockStatement>() {
+        return eval_statement(&node.statements);
+    } else if let Some(node) = node.as_any().downcast_ref::<ast::IfExpression>() {
+        return eval_if_expression(node);
+    } else if let Some(node) = node.as_any().downcast_ref::<ast::ReturnStatement>() {
+        let value = eval(node.return_value.as_ref().unwrap().as_ref());
+        return Box::new(object::ReturnValue { value });
     }
 
     Box::new(object::Null)
@@ -47,9 +52,40 @@ fn eval_statement(stmts: &Vec<Box<dyn ast::Statement>>) -> Box<dyn object::Objec
 
     for statements in stmts {
         result = eval(statements.as_ref());
+
+        if result
+            .as_any()
+            .downcast_ref::<object::ReturnValue>()
+            .is_some()
+        {
+            let return_value = result.into_any().downcast::<object::ReturnValue>().unwrap();
+            return return_value.value;
+        }
     }
 
     result
+}
+
+fn eval_if_expression(node: &ast::IfExpression) -> Box<dyn object::Object> {
+    let condition = eval(node.condition.as_ref().unwrap().as_ref());
+
+    if is_truthy(condition) {
+        eval(node.consequence.as_ref().unwrap())
+    } else if node.alternative.is_some() {
+        eval(node.alternative.as_ref().unwrap())
+    } else {
+        Box::new(object::Null {})
+    }
+}
+
+fn is_truthy(obj: Box<dyn object::Object>) -> bool {
+    if let Some(obj) = obj.as_any().downcast_ref::<object::Boolean>() {
+        if obj.value { true } else { false }
+    } else if obj.as_any().downcast_ref::<object::Null>().is_some() {
+        false
+    } else {
+        true
+    }
 }
 
 fn eval_prefix_expression<'a>(
@@ -175,6 +211,8 @@ fn eval_bang_operator_expression(right: Box<dyn object::Object>) -> Box<dyn obje
 
 #[cfg(test)]
 mod tests {
+    use std::{any::Any, vec};
+
     use crate::{evaluator::eval, lexer, object, parser};
 
     struct EvalInteger<'a> {
@@ -366,6 +404,92 @@ mod tests {
             let evaluated = test_eval(test.input);
             test_boolean_object(evaluated, test.expected);
         }
+    }
+
+    struct ExpectIfElse<'a> {
+        input: &'a str,
+        expected: &'a dyn Any,
+    }
+
+    #[test]
+    fn test_if_else_expression() {
+        let tests = vec![
+            ExpectIfElse {
+                input: "if (true) { 10 }",
+                expected: &10i64,
+            },
+            ExpectIfElse {
+                input: "if (false) { 10 }",
+                expected: &object::Null {},
+            },
+            ExpectIfElse {
+                input: "if (1) { 10 }",
+                expected: &10i64,
+            },
+            ExpectIfElse {
+                input: "if (1 < 2) { 10 }",
+                expected: &10i64,
+            },
+            ExpectIfElse {
+                input: "if (1 > 2) { 10 }",
+                expected: &object::Null {},
+            },
+            ExpectIfElse {
+                input: "if (1 > 2) { 10 } else { 20 }",
+                expected: &20,
+            },
+            ExpectIfElse {
+                input: "if (1 < 2) { 10 } else { 20 }",
+                expected: &10i64,
+            },
+        ];
+
+        for test in tests {
+            let evaluated = test_eval(test.input);
+            let is_integer = test.expected.downcast_ref::<i64>();
+
+            if let Some(int) = is_integer {
+                test_integer_object(evaluated, *int);
+            } else {
+                test_null_object(evaluated);
+            }
+        }
+    }
+
+    #[test]
+    fn test_return_statements() {
+        let tests = vec![
+            EvalInteger {
+                input: "return 10;",
+                expected: 10,
+            },
+            EvalInteger {
+                input: "return 10; 9;",
+                expected: 10,
+            },
+            EvalInteger {
+                input: "return 2 * 5; 9;",
+                expected: 10,
+            },
+            EvalInteger {
+                input: "9; return 2 * 5; 9;",
+                expected: 10,
+            },
+        ];
+
+        for test in tests {
+            let evaluated = test_eval(test.input);
+            test_integer_object(evaluated, test.expected);
+        }
+    }
+
+    fn test_null_object(obj: Box<dyn object::Object>) -> bool {
+        if obj.object_type() != object::NULL_OBJ {
+            eprintln!("object is not null, got = {}", obj.object_type());
+            return false;
+        }
+
+        true
     }
 
     fn test_eval(input: &str) -> Box<dyn object::Object> {
