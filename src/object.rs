@@ -13,6 +13,7 @@ pub const INTEGER_OBJ: &str = "INTEGER";
 pub const BOOLEAN_OBJ: &str = "BOOLEAN";
 pub const NULL_OBJ: &str = "NULL";
 pub const RETURN_VALUE_OBJ: &str = "RETURN_VALUE";
+pub const ERROR_OBJ: &str = "ERROR";
 
 pub struct Integer {
     pub value: i64,
@@ -32,7 +33,7 @@ impl Object for Integer {
     }
 
     fn into_any(self: Box<Self>) -> Box<dyn Any> {
-        Box::new(self)
+        self
     }
 }
 
@@ -54,7 +55,7 @@ impl Object for Boolean {
     }
 
     fn into_any(self: Box<Self>) -> Box<dyn Any> {
-        Box::new(self)
+        self
     }
 }
 
@@ -62,7 +63,7 @@ pub struct Null;
 
 impl Object for Null {
     fn inspect(&self) -> String {
-        format!("null")
+        "null".to_string()
     }
 
     fn object_type(&self) -> ObjectType {
@@ -74,7 +75,7 @@ impl Object for Null {
     }
 
     fn into_any(self: Box<Self>) -> Box<dyn Any> {
-        Box::new(self)
+        self
     }
 }
 
@@ -84,7 +85,7 @@ pub struct ReturnValue {
 
 impl Object for ReturnValue {
     fn inspect(&self) -> String {
-        format!("{}", self.value.inspect())
+        self.value.inspect().to_string()
     }
 
     fn object_type(&self) -> ObjectType {
@@ -96,6 +97,28 @@ impl Object for ReturnValue {
     }
 
     fn into_any(self: Box<Self>) -> Box<dyn Any> {
-        Box::new(self)
+        self
+    }
+}
+
+pub struct Error {
+    pub message: String,
+}
+
+impl Object for Error {
+    fn inspect(&self) -> String {
+        format!("ERROR: {}", self.message)
+    }
+
+    fn object_type(&self) -> ObjectType {
+        ERROR_OBJ
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn into_any(self: Box<Self>) -> Box<dyn Any> {
+        self
     }
 }

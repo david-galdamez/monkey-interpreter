@@ -23,7 +23,7 @@ pub fn start() {
             }
         };
 
-        if parser.errors().len() != 0 {
+        if !parser.errors().is_empty() {
             print_parser_errors(parser.errors());
             continue;
         }

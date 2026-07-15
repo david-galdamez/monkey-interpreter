@@ -310,9 +310,9 @@ impl fmt::Display for IfExpression {
         write!(f, " ")?;
         write!(f, "{}", self.consequence.as_ref().unwrap())?;
 
-        if self.alternative.is_some() {
+        if let Some(alt) = &self.alternative {
             write!(f, "else ")?;
-            write!(f, "{}", self.alternative.as_ref().unwrap())?;
+            write!(f, "{}", alt)?;
         }
 
         Ok(())
