@@ -1,8 +1,10 @@
 use std::io::{self, Write};
 
-use crate::{evaluator, lexer, parser};
+use crate::{evaluator, lexer, object, parser};
 
 pub fn start() {
+    let mut env = object::Environment::new();
+
     loop {
         let mut input = String::new();
         print!(">> ");
@@ -28,7 +30,7 @@ pub fn start() {
             continue;
         }
 
-        let eval = evaluator::eval(&program);
+        let eval = evaluator::eval(&program, &mut env);
         println!("{}", eval.inspect());
     }
 }
