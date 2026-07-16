@@ -1,4 +1,4 @@
-use std::{any::Any, collections::HashMap};
+use std::{any::Any, cell::RefCell, collections::HashMap, rc::Rc};
 
 use crate::{ast, object};
 
@@ -159,20 +159,80 @@ impl Object for Error {
     }
 }
 
-// Environment
+pub struct Function {
+    pub parameters: Vec<ast::Identifier>,
+    pub body: ast::BlockStatement,
+    pub env: Rc<RefCell<Environment>>,
+}
+
+impl Clone for Function {
+    fn clone(&self) -> Self {
+        Function {
+            parameters: self.parameters.clone(),
+            body: self.body.clone(),
+            env: Rc::clone(&self.env),
+        }
+    }
+}
+
+impl Object for Function {
+    fn inspect(&self) -> String {
+        let params: Vec<String> = self.parameters.iter().map(|p| format!("{}", p)).collect();
+        let mut buf = String::new();
+        buf.push_str("fn(");
+        buf.push_str(&params.join(", "));
+        buf.push_str(") {");
+        buf.push_str(&format!("{}", self.body));
+        buf.push_str("\n}");
+
+        buf
+    }
+
+    fn object_type(&self) -> ObjectType {
+        FUNCTION_OBJ
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn into_any(self: Box<Self>) -> Box<dyn Any> {
+        self
+    }
+
+    fn clone_box(&self) -> Box<dyn Object> {
+        Box::new(self.clone())
+    }
+}
+
 pub struct Environment {
     store: HashMap<String, Box<dyn object::Object>>,
+    outer: Option<Rc<RefCell<Environment>>>,
 }
 
 impl Environment {
     pub fn new() -> Self {
         Environment {
             store: HashMap::new(),
+            outer: None,
         }
     }
 
+    pub fn new_enclosed(outer: Rc<RefCell<Environment>>) -> Rc<RefCell<Self>> {
+        Rc::new(RefCell::new(Environment {
+            store: HashMap::new(),
+            outer: Some(outer),
+        }))
+    }
+
     pub fn get(&self, name: &str) -> Option<Box<dyn object::Object>> {
-        self.store.get(name).map(|val| val.clone_box())
+        match self.store.get(name) {
+            Some(val) => Some(val.clone_box()),
+            None => self
+                .outer
+                .as_ref()
+                .and_then(|outer| outer.borrow().get(name)),
+        }
     }
 
     pub fn set(&mut self, name: String, val: Box<dyn object::Object>) {

@@ -1,9 +1,9 @@
-use std::io::{self, Write};
+use std::{cell::RefCell, io::{self, Write}, rc::Rc};
 
 use crate::{evaluator, lexer, object, parser};
 
 pub fn start() {
-    let mut env = object::Environment::new();
+    let env = Rc::new(RefCell::new(object::Environment::new()));
 
     loop {
         let mut input = String::new();
@@ -30,7 +30,7 @@ pub fn start() {
             continue;
         }
 
-        let eval = evaluator::eval(&program, &mut env);
+        let eval = evaluator::eval(&program, Rc::clone(&env));
         println!("{}", eval.inspect());
     }
 }

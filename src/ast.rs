@@ -9,16 +9,29 @@ pub trait Node {
 
 pub trait Statement: Node + fmt::Debug + fmt::Display {
     fn statement_node(&self);
+    fn clone_box(&self) -> Box<dyn Statement>;
 }
 
 pub trait Expression: Node + fmt::Debug + fmt::Display {
     fn expression_node(&self);
     fn as_node(self: Box<Self>) -> Box<dyn Node>;
+    fn clone_box(&self) -> Box<dyn Expression>;
+}
+
+impl Clone for Box<dyn Statement> {
+    fn clone(&self) -> Self {
+        self.clone_box()
+    }
+}
+
+impl Clone for Box<dyn Expression> {
+    fn clone(&self) -> Self {
+        self.clone_box()
+    }
 }
 
 #[derive(Debug, Default)]
 pub struct Program {
-    // We use a Box<dyn Statement> because we can have a lot of Statement implementation
     pub statements: Vec<Box<dyn Statement>>,
 }
 
@@ -79,6 +92,13 @@ impl Node for LetStatement {
 
 impl Statement for LetStatement {
     fn statement_node(&self) {}
+    fn clone_box(&self) -> Box<dyn Statement> {
+        Box::new(LetStatement {
+            token: self.token.clone(),
+            name: self.name.clone(),
+            value: self.value.clone(),
+        })
+    }
 }
 
 #[derive(Debug, Default)]
@@ -109,6 +129,12 @@ impl Node for ReturnStatement {
 
 impl Statement for ReturnStatement {
     fn statement_node(&self) {}
+    fn clone_box(&self) -> Box<dyn Statement> {
+        Box::new(ReturnStatement {
+            token: self.token.clone(),
+            return_value: self.return_value.clone(),
+        })
+    }
 }
 
 #[derive(Debug, Default)]
@@ -138,6 +164,12 @@ impl Node for ExpressionStatement {
 
 impl Statement for ExpressionStatement {
     fn statement_node(&self) {}
+    fn clone_box(&self) -> Box<dyn Statement> {
+        Box::new(ExpressionStatement {
+            token: self.token.clone(),
+            expression: self.expression.clone(),
+        })
+    }
 }
 
 #[derive(Debug, Default, Clone)]
@@ -167,6 +199,9 @@ impl Expression for Identifier {
     fn as_node(self: Box<Self>) -> Box<dyn Node> {
         self
     }
+    fn clone_box(&self) -> Box<dyn Expression> {
+        Box::new(self.clone())
+    }
 }
 
 #[derive(Debug, Default, Clone)]
@@ -195,6 +230,9 @@ impl Expression for IntegerLiteral {
     fn expression_node(&self) {}
     fn as_node(self: Box<Self>) -> Box<dyn Node> {
         self
+    }
+    fn clone_box(&self) -> Box<dyn Expression> {
+        Box::new(self.clone())
     }
 }
 
@@ -228,6 +266,13 @@ impl Expression for PrefixExpression {
     fn expression_node(&self) {}
     fn as_node(self: Box<Self>) -> Box<dyn Node> {
         self
+    }
+    fn clone_box(&self) -> Box<dyn Expression> {
+        Box::new(PrefixExpression {
+            token: self.token.clone(),
+            operator: self.operator.clone(),
+            right: self.right.clone(),
+        })
     }
 }
 
@@ -264,9 +309,17 @@ impl Expression for InfixExpression {
     fn as_node(self: Box<Self>) -> Box<dyn Node> {
         self
     }
+    fn clone_box(&self) -> Box<dyn Expression> {
+        Box::new(InfixExpression {
+            token: self.token.clone(),
+            left: self.left.clone(),
+            operator: self.operator.clone(),
+            right: self.right.clone(),
+        })
+    }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Boolean {
     pub token: token::Token,
     pub value: bool,
@@ -292,6 +345,9 @@ impl Expression for Boolean {
     fn expression_node(&self) {}
     fn as_node(self: Box<Self>) -> Box<dyn Node> {
         self
+    }
+    fn clone_box(&self) -> Box<dyn Expression> {
+        Box::new(self.clone())
     }
 }
 
@@ -334,9 +390,17 @@ impl Expression for IfExpression {
         self
     }
     fn expression_node(&self) {}
+    fn clone_box(&self) -> Box<dyn Expression> {
+        Box::new(IfExpression {
+            token: self.token.clone(),
+            condition: self.condition.clone(),
+            consequence: self.consequence.clone(),
+            alternative: self.alternative.clone(),
+        })
+    }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct BlockStatement {
     pub token: token::Token,
     pub statements: Vec<Box<dyn Statement>>,
@@ -364,6 +428,9 @@ impl Node for BlockStatement {
 
 impl Statement for BlockStatement {
     fn statement_node(&self) {}
+    fn clone_box(&self) -> Box<dyn Statement> {
+        Box::new(self.clone())
+    }
 }
 
 #[derive(Debug, Default)]
@@ -400,6 +467,13 @@ impl Expression for FunctionLiteral {
     fn as_node(self: Box<Self>) -> Box<dyn Node> {
         self
     }
+    fn clone_box(&self) -> Box<dyn Expression> {
+        Box::new(FunctionLiteral {
+            token: self.token.clone(),
+            parameters: self.parameters.clone(),
+            body: self.body.clone(),
+        })
+    }
 }
 
 #[derive(Debug, Default)]
@@ -434,5 +508,12 @@ impl Expression for CallExpression {
     fn expression_node(&self) {}
     fn as_node(self: Box<Self>) -> Box<dyn Node> {
         self
+    }
+    fn clone_box(&self) -> Box<dyn Expression> {
+        Box::new(CallExpression {
+            token: self.token.clone(),
+            function: self.function.clone(),
+            arguments: self.arguments.clone(),
+        })
     }
 }
