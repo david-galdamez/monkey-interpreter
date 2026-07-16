@@ -22,6 +22,7 @@ pub const ERROR_OBJ: &str = "ERROR";
 pub const FUNCTION_OBJ: &str = "FUNCTION";
 pub const STRING_OBJ: &str = "STRING";
 pub const BUILTIN_OBJ: &str = "BUILTIN";
+pub const ARRAY_OBJ: &str = "ARRAY";
 
 #[derive(Debug, Clone, Copy)]
 pub struct Integer {
@@ -202,6 +203,47 @@ impl Object for Builtin {
 
     fn object_type(&self) -> ObjectType {
         BUILTIN_OBJ
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn into_any(self: Box<Self>) -> Box<dyn Any> {
+        self
+    }
+
+    fn clone_box(&self) -> Box<dyn Object> {
+        Box::new(self.clone())
+    }
+}
+
+pub struct Array {
+    pub elements: Vec<Box<dyn Object>>,
+}
+
+impl Clone for Array {
+    fn clone(&self) -> Self {
+        Array {
+            elements: self.elements.iter().map(|e| e.clone_box()).collect(),
+        }
+    }
+}
+
+impl Object for Array {
+    fn inspect(&self) -> String {
+        let elements: Vec<String> = self.elements.iter().map(|p| p.inspect()).collect();
+
+        let mut buffer = String::new();
+        buffer.push_str("[");
+        buffer.push_str(&elements.join(", "));
+        buffer.push_str("]");
+
+        buffer
+    }
+
+    fn object_type(&self) -> ObjectType {
+        ARRAY_OBJ
     }
 
     fn as_any(&self) -> &dyn Any {

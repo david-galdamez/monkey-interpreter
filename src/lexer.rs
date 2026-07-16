@@ -127,6 +127,8 @@ impl<'a> Lexer<'a> {
             ',' => token = new_token(token::COMMA, self.ch),
             '{' => token = new_token(token::LBRACE, self.ch),
             '}' => token = new_token(token::RBRACE, self.ch),
+            '[' => token = new_token(token::LBRACKET, self.ch),
+            ']' => token = new_token(token::RBRACKET, self.ch),
             '"' => {
                 token.token_type = token::STRING;
                 token.literal = self.read_string();
@@ -187,6 +189,7 @@ mod tests {
         10 != 9;
         \"foobar\"
         \"foo bar\"
+        [1, 2];
             ";
 
         let tests = vec![
@@ -491,6 +494,30 @@ mod tests {
                 expected_literal: "foo bar".to_string(),
             },
             Expected {
+                expected_type: token::LBRACKET,
+                expected_literal: "[".to_string(),
+            },
+            Expected {
+                expected_type: token::INT,
+                expected_literal: "1".to_string(),
+            },
+            Expected {
+                expected_type: token::COMMA,
+                expected_literal: ",".to_string(),
+            },
+            Expected {
+                expected_type: token::INT,
+                expected_literal: "2".to_string(),
+            },
+            Expected {
+                expected_type: token::RBRACKET,
+                expected_literal: "]".to_string(),
+            },
+            Expected {
+                expected_type: token::SEMICOLON,
+                expected_literal: ";".to_string(),
+            },
+            Expected {
                 expected_type: token::EOF,
                 expected_literal: '\x00'.to_string(),
             },
@@ -512,4 +539,3 @@ mod tests {
         }
     }
 }
-

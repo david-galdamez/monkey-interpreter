@@ -1,4 +1,4 @@
-use std::{any::Any, fmt};
+use std::{any::Any, fmt, ops::Index};
 
 use crate::token;
 
@@ -541,6 +541,79 @@ impl Node for StringLiteral {
 }
 
 impl Expression for StringLiteral {
+    fn expression_node(&self) {}
+    fn as_node(self: Box<Self>) -> Box<dyn Node> {
+        self
+    }
+    fn clone_box(&self) -> Box<dyn Expression> {
+        Box::new(self.clone())
+    }
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct ArrayLiteral {
+    pub token: token::Token, // token::IDENT token
+    pub elements: Vec<Box<dyn Expression>>,
+}
+
+impl fmt::Display for ArrayLiteral {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let args: Vec<String> = self.elements.iter().map(|p| format!("{}", p)).collect();
+
+        write!(f, "[")?;
+        write!(f, "{}", args.join(", "))?;
+        write!(f, "]")
+    }
+}
+
+impl Node for ArrayLiteral {
+    fn token_literal(&self) -> &str {
+        &self.token.literal
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+impl Expression for ArrayLiteral {
+    fn expression_node(&self) {}
+    fn as_node(self: Box<Self>) -> Box<dyn Node> {
+        self
+    }
+    fn clone_box(&self) -> Box<dyn Expression> {
+        Box::new(self.clone())
+    }
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct IndexExpression {
+    pub token: token::Token, // token::IDENT token
+    pub left: Option<Box<dyn Expression>>,
+    pub index: Option<Box<dyn Expression>>,
+}
+
+impl fmt::Display for IndexExpression {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "(")?;
+        write!(f, "{}", self.left.as_ref().unwrap())?;
+        write!(f, "[")?;
+        write!(f, "{}", self.index.as_ref().unwrap())?;
+        write!(f, "])")
+    }
+}
+
+impl Node for IndexExpression {
+    fn token_literal(&self) -> &str {
+        &self.token.literal
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+impl Expression for IndexExpression {
     fn expression_node(&self) {}
     fn as_node(self: Box<Self>) -> Box<dyn Node> {
         self

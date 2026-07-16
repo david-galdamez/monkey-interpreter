@@ -1,4 +1,4 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{any::Any, cell::RefCell, rc::Rc};
 
 use crate::{
     ast, builtin,
@@ -105,6 +105,22 @@ pub fn eval(
         return Box::new(object::StringObject {
             value: node.value.clone(),
         });
+    } else if let Some(node) = node.as_any().downcast_ref::<ast::ArrayLiteral>() {
+        let elements = eval_expressions(&node.elements, Rc::clone(&env));
+        if elements.len() == 1 && is_error(&elements[0]) {
+            return elements[0].clone_box();
+        }
+        return Box::new(object::Array { elements });
+    } else if let Some(node) = node.as_any().downcast_ref::<ast::IndexExpression>() {
+        let left = eval(node.left.as_ref().unwrap().as_ref(), Rc::clone(&env));
+        if is_error(&left) {
+            return left;
+        }
+        let index = eval(node.index.as_ref().unwrap().as_ref(), Rc::clone(&env));
+        if is_error(&index) {
+            return index;
+        }
+        return eval_index_expression(left, index);
     }
 
     Box::new(object::Null)
@@ -185,6 +201,39 @@ fn eval_expressions(
     }
 
     result
+}
+
+fn eval_index_expression(
+    left: Box<dyn object::Object>,
+    index: Box<dyn object::Object>,
+) -> Box<dyn object::Object> {
+    if left.object_type() == object::ARRAY_OBJ && index.object_type() == object::INTEGER_OBJ {
+        return eval_array_index_expression(left, index);
+    }
+
+    return new_error(format!(
+        "index operator not supported: {}",
+        left.object_type()
+    ));
+}
+
+fn eval_array_index_expression(
+    array: Box<dyn object::Object>,
+    index: Box<dyn object::Object>,
+) -> Box<dyn object::Object> {
+    let array_obj = array.as_any().downcast_ref::<object::Array>().unwrap();
+    let idx = index
+        .as_any()
+        .downcast_ref::<object::Integer>()
+        .unwrap()
+        .value;
+    let max = (array_obj.elements.len() - 1) as i64;
+
+    if idx < 0 || idx > max {
+        return Box::new(object::Null);
+    }
+
+    array_obj.elements[idx as usize].clone_box()
 }
 
 fn apply_function(
@@ -931,6 +980,82 @@ mod tests {
                     "wrong error message. expected={}, got={}",
                     *expected, err_obj.message
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn test_array_literal() {
+        let input = "[1, 2 * 2, 3 + 3]";
+
+        let evaluated = test_eval(input);
+        let eval = evaluated.as_any().downcast_ref::<object::Array>();
+        assert!(eval.is_some(), "object is not an array");
+        let eval = eval.unwrap();
+
+        assert_eq!(
+            eval.elements.len(),
+            3,
+            "array has wrong number of elements. got={}",
+            eval.elements.len()
+        );
+
+        test_integer_object(eval.elements[0].clone_box(), 1);
+        test_integer_object(eval.elements[1].clone_box(), 4);
+        test_integer_object(eval.elements[2].clone_box(), 6);
+    }
+
+    #[test]
+    fn test_array_index_expressions() {
+        let tests = vec![
+            ExpectIfElse {
+                input: "[1, 2, 3][0]",
+                expected: &1,
+            },
+            ExpectIfElse {
+                input: "[1, 2, 3][1]",
+                expected: &2,
+            },
+            ExpectIfElse {
+                input: "[1, 2, 3][2]",
+                expected: &3,
+            },
+            ExpectIfElse {
+                input: "let i = 0; [1][i]",
+                expected: &1,
+            },
+            ExpectIfElse {
+                input: "[1, 2, 3][1 + 1]",
+                expected: &3,
+            },
+            ExpectIfElse {
+                input: "let myArray = [1, 2, 3]; myArray[2];",
+                expected: &3,
+            },
+            ExpectIfElse {
+                input: "let myArray = [1, 2, 3]; myArray[0] + myArray[1] + myArray[2];",
+                expected: &6,
+            },
+            ExpectIfElse {
+                input: "let myArray = [1, 2, 3]; let i = myArray[0]; myArray[i];",
+                expected: &2,
+            },
+            ExpectIfElse {
+                input: "[1, 2, 3][3]",
+                expected: &object::Null,
+            },
+            ExpectIfElse {
+                input: "[1, 2, 3][-1]",
+                expected: &object::Null,
+            },
+        ];
+
+        for test in tests {
+            let evaluated = test_eval(test.input);
+            if let Some(eval) = evaluated.as_any().downcast_ref::<i64>() {
+                test_integer_object(evaluated.clone_box(), *eval);
+            } else {
+                test_null_object(evaluated.clone_box());
             }
         }
     }
