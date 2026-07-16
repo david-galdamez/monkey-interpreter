@@ -4,7 +4,7 @@ use crate::{
     ast::{
         BlockStatement, Boolean, CallExpression, Expression, ExpressionStatement, FunctionLiteral,
         Identifier, IfExpression, InfixExpression, IntegerLiteral, LetStatement, PrefixExpression,
-        Program, ReturnStatement, Statement,
+        Program, ReturnStatement, Statement, StringLiteral,
     },
     lexer, token,
 };
@@ -72,6 +72,7 @@ impl<'a> Parser<'a> {
         parser.register_prefix(token::LPAREN, Parser::parse_grouped_expression);
         parser.register_prefix(token::IF, Parser::parse_if_expression);
         parser.register_prefix(token::FUNCTION, Parser::parse_function_literal);
+        parser.register_prefix(token::STRING, Parser::parse_string_literal);
 
         // register infixes
         parser.register_infix(token::PLUS, Parser::parse_infix_expression);
@@ -359,6 +360,13 @@ impl<'a> Parser<'a> {
         Some(Box::new(lit))
     }
 
+    fn parse_string_literal(parser: &mut Parser) -> Option<Box<dyn Expression>> {
+        Some(Box::new(StringLiteral {
+            token: parser.cur_token.clone(),
+            value: parser.cur_token.literal.clone(),
+        }))
+    }
+
     // infixes
 
     fn parse_infix_expression(
@@ -490,7 +498,7 @@ mod tests {
         ast::{
             Boolean, CallExpression, Expression, ExpressionStatement, FunctionLiteral, Identifier,
             IfExpression, InfixExpression, IntegerLiteral, LetStatement, Node, PrefixExpression,
-            ReturnStatement, Statement,
+            ReturnStatement, StringLiteral,
         },
         lexer::Lexer,
         parser::Parser,
@@ -559,37 +567,6 @@ mod tests {
             println!("parser error: {err}");
         }
         panic!();
-    }
-
-    fn let_statement(stmt: &Box<dyn Statement>, expected: &str) -> bool {
-        if stmt.token_literal() != "let" {
-            println!("s.token_literal not 'let', got = {}", stmt.token_literal());
-            return false;
-        }
-
-        let type_stmt = stmt.as_any().downcast_ref::<LetStatement>();
-
-        if type_stmt.is_none() {
-            println!("stmt not LetStatement");
-            return false;
-        }
-
-        let stmt = type_stmt.unwrap();
-
-        if stmt.name.value != expected {
-            println!(
-                "stmt.name.value not '{}', got = {}",
-                expected, stmt.name.value
-            );
-            return false;
-        }
-
-        if stmt.name.token_literal() != expected {
-            println!("stmt.name not {}, got = {:?}", expected, stmt.name);
-            return false;
-        }
-
-        true
     }
 
     #[test]
@@ -1397,6 +1374,52 @@ mod tests {
         test_literal_expression(&call.arguments[0], &1);
         test_infix_expression(&call.arguments[1], &2, "*", &3);
         test_infix_expression(&call.arguments[2], &4, "*", &5);
+    }
+
+    #[test]
+    fn test_string_literal_expression() {
+        let input = "\"hello world\";";
+
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer);
+        let program = parser.parse_program();
+
+        check_parse_errors(&parser);
+
+        assert!(program.is_some(), "parse_program() returned none");
+
+        let program = program.unwrap();
+        let type_stmt = program.statements[0]
+            .as_any()
+            .downcast_ref::<ExpressionStatement>();
+
+        assert!(
+            type_stmt.is_some(),
+            "program.statement[0] is not an expression statement"
+        );
+
+        let stmt = type_stmt.unwrap();
+        let exp = match &stmt.expression {
+            Some(expression) => {
+                let exp = expression.as_any();
+                exp.downcast_ref::<StringLiteral>()
+            }
+            None => {
+                panic!("no expression found");
+            }
+        };
+
+        assert!(
+            exp.is_some(),
+            "statement.expression is not an StringLiteral expression"
+        );
+        let exp = exp.unwrap();
+
+        assert!(
+            exp.value == "hello world",
+            "ident.value not foobar, got = {}",
+            exp.value
+        );
     }
 
     // HELPERS FOR THE TESTS

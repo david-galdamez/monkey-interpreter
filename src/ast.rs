@@ -517,3 +517,35 @@ impl Expression for CallExpression {
         })
     }
 }
+
+#[derive(Debug, Default, Clone)]
+pub struct StringLiteral {
+    pub token: token::Token, // token::IDENT token
+    pub value: String,
+}
+
+impl fmt::Display for StringLiteral {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.value)
+    }
+}
+
+impl Node for StringLiteral {
+    fn token_literal(&self) -> &str {
+        &self.token.literal
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+impl Expression for StringLiteral {
+    fn expression_node(&self) {}
+    fn as_node(self: Box<Self>) -> Box<dyn Node> {
+        self
+    }
+    fn clone_box(&self) -> Box<dyn Expression> {
+        Box::new(self.clone())
+    }
+}

@@ -66,6 +66,17 @@ impl<'a> Lexer<'a> {
         self.input[position..self.position - 1].trim().to_string()
     }
 
+    fn read_string(&mut self) -> String {
+        let position = self.position;
+        loop {
+            self.read_char();
+            if self.ch == '"' || self.ch == '\x00' {
+                break;
+            }
+        }
+        self.input[position..self.position - 1].to_string()
+    }
+
     fn skip_whitespace(&mut self) {
         // important to do a while so we can skip all the
         // whitespace
@@ -116,6 +127,10 @@ impl<'a> Lexer<'a> {
             ',' => token = new_token(token::COMMA, self.ch),
             '{' => token = new_token(token::LBRACE, self.ch),
             '}' => token = new_token(token::RBRACE, self.ch),
+            '"' => {
+                token.token_type = token::STRING;
+                token.literal = self.read_string();
+            }
             '\x00' => {
                 token.literal = char::default().to_string();
                 token.token_type = token::EOF;
@@ -170,6 +185,8 @@ mod tests {
 
         10 == 10;
         10 != 9;
+        \"foobar\"
+        \"foo bar\"
             ";
 
         let tests = vec![
@@ -466,6 +483,14 @@ mod tests {
                 expected_literal: ";".to_string(),
             },
             Expected {
+                expected_type: token::STRING,
+                expected_literal: "foobar".to_string(),
+            },
+            Expected {
+                expected_type: token::STRING,
+                expected_literal: "foo bar".to_string(),
+            },
+            Expected {
                 expected_type: token::EOF,
                 expected_literal: '\x00'.to_string(),
             },
@@ -487,3 +512,4 @@ mod tests {
         }
     }
 }
+

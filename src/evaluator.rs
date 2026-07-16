@@ -1,6 +1,9 @@
 use std::{cell::RefCell, rc::Rc};
 
-use crate::{ast, object};
+use crate::{
+    ast, builtin,
+    object::{self, Object},
+};
 
 pub fn eval(
     node: &dyn ast::Node,
@@ -72,10 +75,16 @@ pub fn eval(
         env.borrow_mut().set(node.name.value.clone(), value);
     } else if let Some(node) = node.as_any().downcast_ref::<ast::Identifier>() {
         let result = env.borrow().get(&node.value);
-        if result.is_none() {
-            return new_error(format!("identifier not found: {}", node.value));
+        if let Some(res) = result {
+            return res.clone_box();
         }
-        return result.unwrap();
+
+        let builtin = builtin::builtins(&node.value);
+        if let Some(bltn) = builtin {
+            return bltn.clone_box();
+        }
+
+        return new_error(format!("identifier not found: {}", node.value));
     } else if let Some(node) = node.as_any().downcast_ref::<ast::FunctionLiteral>() {
         return Box::new(object::Function {
             parameters: node.parameters.clone(),
@@ -92,6 +101,10 @@ pub fn eval(
             return args[0].clone_box();
         }
         return apply_function(function, args);
+    } else if let Some(node) = node.as_any().downcast_ref::<ast::StringLiteral>() {
+        return Box::new(object::StringObject {
+            value: node.value.clone(),
+        });
     }
 
     Box::new(object::Null)
@@ -178,6 +191,12 @@ fn apply_function(
     func: Box<dyn object::Object>,
     args: Vec<Box<dyn object::Object>>,
 ) -> Box<dyn object::Object> {
+    if func.object_type() == object::BUILTIN_OBJ {
+        let func = func.into_any().downcast::<object::Builtin>().unwrap();
+
+        return (func.func)(&args);
+    }
+
     if func.object_type() != object::FUNCTION_OBJ {
         return new_error(format!("not a function: {}", func.object_type()));
     }
@@ -243,6 +262,10 @@ fn eval_infix_expression(
 ) -> Box<dyn object::Object> {
     if left.object_type() == object::INTEGER_OBJ && right.object_type() == object::INTEGER_OBJ {
         return eval_integer_infix_expression(operator, left, right);
+    }
+
+    if left.object_type() == object::STRING_OBJ && right.object_type() == object::STRING_OBJ {
+        return eval_string_infix_expression(operator, left, right);
     }
 
     if left.object_type() != right.object_type() {
@@ -333,6 +356,37 @@ fn eval_integer_infix_expression(
     }
 }
 
+fn eval_string_infix_expression(
+    operator: &str,
+    left: Box<dyn object::Object>,
+    right: Box<dyn object::Object>,
+) -> Box<dyn object::Object> {
+    if operator != "+" {
+        return new_error(format!(
+            "unknown operator: {} {} {}",
+            left.object_type(),
+            operator,
+            right.object_type()
+        ));
+    }
+
+    let left_val = &left
+        .as_any()
+        .downcast_ref::<object::StringObject>()
+        .expect("left object integer not found")
+        .value;
+
+    let right_val = &right
+        .as_any()
+        .downcast_ref::<object::StringObject>()
+        .expect("right object integer not found")
+        .value;
+
+    Box::new(object::StringObject {
+        value: format!("{}{}", left_val, right_val),
+    })
+}
+
 fn eval_minus_prefix_operator_expression(
     right: Box<dyn object::Object>,
 ) -> Box<dyn object::Object> {
@@ -359,7 +413,7 @@ fn eval_bang_operator_expression(right: Box<dyn object::Object>) -> Box<dyn obje
     }
 }
 
-fn new_error(message: String) -> Box<object::Error> {
+pub fn new_error(message: String) -> Box<object::Error> {
     Box::new(object::Error { message })
 }
 
@@ -700,6 +754,10 @@ mod tests {
                 input: "foobar",
                 expected_message: "identifier not found: foobar",
             },
+            ExpectError {
+                input: "\"Hello\" - \"World!\"",
+                expected_message: "unknown operator: STRING - STRING",
+            },
         ];
 
         for test in tests {
@@ -808,6 +866,73 @@ mod tests {
         ";
         let evaluated = test_eval(input);
         test_integer_object(evaluated, 5);
+    }
+
+    #[test]
+    fn test_string_literal() {
+        let input = "\"Hello World!\"";
+
+        let evaluated = test_eval(input);
+        let eval = evaluated.as_any().downcast_ref::<object::StringObject>();
+        assert!(eval.is_some(), "object is not a string");
+        let eval = eval.unwrap();
+
+        assert_eq!(eval.value, "Hello World!", "String has wrong value");
+    }
+
+    #[test]
+    fn test_string_concatenation() {
+        let input = "\"Hello\" + \" \" + \"World!\"";
+
+        let evaluated = test_eval(input);
+        let eval = evaluated.as_any().downcast_ref::<object::StringObject>();
+        assert!(eval.is_some(), "object is not a string");
+        let eval = eval.unwrap();
+
+        assert_eq!(eval.value, "Hello World!", "String has wrong value");
+    }
+
+    #[test]
+    fn test_builtin_functions() {
+        let tests = vec![
+            ExpectIfElse {
+                input: "len(\"\")",
+                expected: &0,
+            },
+            ExpectIfElse {
+                input: "len(\"four\")",
+                expected: &4,
+            },
+            ExpectIfElse {
+                input: "len(\"hello world\")",
+                expected: &11,
+            },
+            ExpectIfElse {
+                input: "len(1)",
+                expected: &"argument to \"len\" not supported, got INTEGER",
+            },
+            ExpectIfElse {
+                input: "len(\"one\", \"two\")",
+                expected: &"wrong number of arguments. got=2, want=1",
+            },
+        ];
+
+        for test in tests {
+            let evaluated = test_eval(test.input);
+            if test.expected.is::<i64>() {
+                test_integer_object(evaluated, *test.expected.downcast_ref::<i64>().unwrap());
+            } else if test.expected.is::<String>() {
+                let expected = test.expected.downcast_ref::<String>().unwrap();
+                let err_obj = evaluated.as_any().downcast_ref::<object::Error>();
+                assert!(err_obj.is_some(), "object is not Error.");
+                let err_obj = err_obj.unwrap();
+                assert_eq!(
+                    err_obj.message, *expected,
+                    "wrong error message. expected={}, got={}",
+                    *expected, err_obj.message
+                );
+            }
+        }
     }
 
     fn test_null_object(obj: Box<dyn object::Object>) -> bool {

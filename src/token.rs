@@ -12,6 +12,7 @@ pub const EOF: &str = "EOF";
 // Identifiers + literals
 pub const IDENT: &str = "IDENT";
 pub const INT: &str = "INT";
+pub const STRING: &str = "STRING";
 
 // Operators
 pub const ASSIGN: &str = "=";
