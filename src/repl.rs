@@ -1,8 +1,10 @@
-use std::io::{self, Write};
+use std::{cell::RefCell, io::{self, Write}, rc::Rc};
 
-use crate::{lexer, parser};
+use crate::{evaluator, lexer, object, parser};
 
 pub fn start() {
+    let env = Rc::new(RefCell::new(object::Environment::new()));
+
     loop {
         let mut input = String::new();
         print!(">> ");
@@ -23,11 +25,13 @@ pub fn start() {
             }
         };
 
-        if parser.errors().len() != 0 {
+        if !parser.errors().is_empty() {
             print_parser_errors(parser.errors());
+            continue;
         }
 
-        println!("{}", program);
+        let eval = evaluator::eval(&program, Rc::clone(&env));
+        println!("{}", eval.inspect());
     }
 }
 
