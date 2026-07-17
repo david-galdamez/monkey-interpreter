@@ -2,11 +2,13 @@ use std::{collections::HashMap, mem};
 
 use crate::{
     ast::{
-        BlockStatement, Boolean, CallExpression, Expression, ExpressionStatement, FunctionLiteral,
-        Identifier, IfExpression, InfixExpression, IntegerLiteral, LetStatement, PrefixExpression,
-        Program, ReturnStatement, Statement,
+        ArrayLiteral, BlockStatement, Boolean, CallExpression, Expression, ExpressionStatement,
+        FunctionLiteral, HashLiteral, Identifier, IfExpression, IndexExpression, InfixExpression,
+        IntegerLiteral, LetStatement, PrefixExpression, Program, ReturnStatement, Statement,
+        StringLiteral,
     },
-    lexer, token,
+    lexer,
+    token::{self, TokenType},
 };
 
 #[derive(Debug, Ord, PartialEq, PartialOrd, Eq)]
@@ -18,6 +20,7 @@ enum ExpressionConstants {
     PRODUCT,
     PREFIX,
     CALL,
+    INDEX,
 }
 
 fn precedences(tok: token::TokenType) -> ExpressionConstants {
@@ -31,6 +34,7 @@ fn precedences(tok: token::TokenType) -> ExpressionConstants {
         token::SLASH => ExpressionConstants::PRODUCT,
         token::ASTERISK => ExpressionConstants::PRODUCT,
         token::LPAREN => ExpressionConstants::CALL,
+        token::LBRACKET => ExpressionConstants::INDEX,
         _ => ExpressionConstants::LOWEST,
     }
 }
@@ -72,6 +76,9 @@ impl<'a> Parser<'a> {
         parser.register_prefix(token::LPAREN, Parser::parse_grouped_expression);
         parser.register_prefix(token::IF, Parser::parse_if_expression);
         parser.register_prefix(token::FUNCTION, Parser::parse_function_literal);
+        parser.register_prefix(token::STRING, Parser::parse_string_literal);
+        parser.register_prefix(token::LBRACKET, Parser::parse_array_literal);
+        parser.register_prefix(token::LBRACE, Parser::parse_hash_literal);
 
         // register infixes
         parser.register_infix(token::PLUS, Parser::parse_infix_expression);
@@ -83,6 +90,7 @@ impl<'a> Parser<'a> {
         parser.register_infix(token::LT, Parser::parse_infix_expression);
         parser.register_infix(token::GT, Parser::parse_infix_expression);
         parser.register_infix(token::LPAREN, Parser::parse_call_expression);
+        parser.register_infix(token::LBRACKET, Parser::parse_index_expression);
 
         parser.next_token();
         parser.next_token();
@@ -328,7 +336,7 @@ impl<'a> Parser<'a> {
         if parser.peek_token_is(token::ELSE) {
             parser.next_token();
 
-            if !parser.peek_token_is(token::LBRACE) {
+            if !parser.expect_peek(token::LBRACE) {
                 return None;
             }
 
@@ -359,7 +367,78 @@ impl<'a> Parser<'a> {
         Some(Box::new(lit))
     }
 
+    fn parse_string_literal(parser: &mut Parser) -> Option<Box<dyn Expression>> {
+        Some(Box::new(StringLiteral {
+            token: parser.cur_token.clone(),
+            value: parser.cur_token.literal.clone(),
+        }))
+    }
+
+    fn parse_array_literal(parser: &mut Parser) -> Option<Box<dyn Expression>> {
+        let mut array = ArrayLiteral {
+            token: parser.cur_token.clone(),
+            ..Default::default()
+        };
+        array.elements = parser.parse_expression_list(token::RBRACKET);
+
+        Some(Box::new(array))
+    }
+
+    fn parse_hash_literal(parser: &mut Parser) -> Option<Box<dyn Expression>> {
+        let mut hash = HashLiteral {
+            token: parser.cur_token.clone(),
+            ..Default::default()
+        };
+
+        while !parser.peek_token_is(token::RBRACE) {
+            parser.next_token();
+            let key = parser.parse_expression(ExpressionConstants::LOWEST);
+
+            if !parser.expect_peek(token::COLON) {
+                return None;
+            }
+
+            parser.next_token();
+            let value = parser.parse_expression(ExpressionConstants::LOWEST);
+            hash.pairs.push((key.unwrap(), value.unwrap()));
+
+            if !parser.peek_token_is(token::RBRACE) && !parser.expect_peek(token::COMMA) {
+                return None;
+            }
+        }
+
+        if !parser.expect_peek(token::RBRACE) {
+            return None;
+        }
+
+        Some(Box::new(hash))
+    }
+
     // infixes
+
+    fn parse_expression_list(&mut self, end: TokenType) -> Vec<Box<dyn Expression>> {
+        let mut list = Vec::new();
+
+        if self.peek_token_is(end) {
+            self.next_token();
+            return list;
+        }
+
+        self.next_token();
+        list.push(self.parse_expression(ExpressionConstants::LOWEST).unwrap());
+
+        while self.peek_token_is(token::COMMA) {
+            self.next_token();
+            self.next_token();
+            list.push(self.parse_expression(ExpressionConstants::LOWEST).unwrap());
+        }
+
+        if !self.expect_peek(end) {
+            return Vec::new();
+        }
+
+        list
+    }
 
     fn parse_infix_expression(
         parser: &mut Parser,
@@ -388,33 +467,30 @@ impl<'a> Parser<'a> {
             function: func,
             ..Default::default()
         };
-        exp.arguments = parser.parse_call_arguments();
+        exp.arguments = parser.parse_expression_list(token::RPAREN);
 
         Some(Box::new(exp))
     }
 
-    fn parse_call_arguments(&mut self) -> Vec<Box<dyn Expression>> {
-        let mut args = Vec::new();
+    fn parse_index_expression(
+        parser: &mut Parser,
+        left: Option<Box<dyn Expression>>,
+    ) -> Option<Box<dyn Expression>> {
+        let mut exp = IndexExpression {
+            token: parser.cur_token.clone(),
+            left,
+            ..Default::default()
+        };
 
-        if self.peek_token_is(token::RPAREN) {
-            self.next_token();
-            return args;
+        parser.next_token();
+
+        exp.index = parser.parse_expression(ExpressionConstants::LOWEST);
+
+        if !parser.expect_peek(token::RBRACKET) {
+            return None;
         }
 
-        self.next_token();
-        args.push(self.parse_expression(ExpressionConstants::LOWEST).unwrap());
-
-        while self.peek_token_is(token::COMMA) {
-            self.next_token();
-            self.next_token();
-            args.push(self.parse_expression(ExpressionConstants::LOWEST).unwrap());
-        }
-
-        if !self.expect_peek(token::RPAREN) {
-            return Vec::new();
-        }
-
-        args
+        Some(Box::new(exp))
     }
 
     fn no_prefix_parse_fn_error(&mut self, tok: token::TokenType) {
@@ -484,13 +560,14 @@ impl<'a> Parser<'a> {
 
 #[cfg(test)]
 mod tests {
-    use std::any::Any;
+    use std::{any::Any, collections::HashMap};
 
     use crate::{
         ast::{
-            Boolean, CallExpression, Expression, ExpressionStatement, FunctionLiteral, Identifier,
-            IfExpression, InfixExpression, IntegerLiteral, LetStatement, Node, PrefixExpression,
-            ReturnStatement, Statement,
+            self, ArrayLiteral, Boolean, CallExpression, Expression, ExpressionStatement,
+            FunctionLiteral, HashLiteral, Identifier, IfExpression, IndexExpression,
+            InfixExpression, IntegerLiteral, LetStatement, Node, PrefixExpression, ReturnStatement,
+            StringLiteral,
         },
         lexer::Lexer,
         parser::Parser,
@@ -559,37 +636,6 @@ mod tests {
             println!("parser error: {err}");
         }
         panic!();
-    }
-
-    fn let_statement(stmt: &Box<dyn Statement>, expected: &str) -> bool {
-        if stmt.token_literal() != "let" {
-            println!("s.token_literal not 'let', got = {}", stmt.token_literal());
-            return false;
-        }
-
-        let type_stmt = stmt.as_any().downcast_ref::<LetStatement>();
-
-        if type_stmt.is_none() {
-            println!("stmt not LetStatement");
-            return false;
-        }
-
-        let stmt = type_stmt.unwrap();
-
-        if stmt.name.value != expected {
-            println!(
-                "stmt.name.value not '{}', got = {}",
-                expected, stmt.name.value
-            );
-            return false;
-        }
-
-        if stmt.name.token_literal() != expected {
-            println!("stmt.name not {}, got = {:?}", expected, stmt.name);
-            return false;
-        }
-
-        true
     }
 
     #[test]
@@ -1084,6 +1130,14 @@ mod tests {
                 input: "add(a + b + c * d / f + g)",
                 expected: "add((((a + b) + ((c * d) / f)) + g))",
             },
+            PrecedenceTest {
+                input: "a * [1, 2, 3, 4][b * c] * d",
+                expected: "((a * ([1, 2, 3, 4][(b * c)])) * d)",
+            },
+            PrecedenceTest {
+                input: "add(a * b[2], b[1], 2 * [1, 2][1])",
+                expected: "add((a * (b[2])), (b[1]), (2 * ([1, 2][1])))",
+            },
         ];
 
         for test in tests {
@@ -1397,6 +1451,240 @@ mod tests {
         test_literal_expression(&call.arguments[0], &1);
         test_infix_expression(&call.arguments[1], &2, "*", &3);
         test_infix_expression(&call.arguments[2], &4, "*", &5);
+    }
+
+    #[test]
+    fn test_string_literal_expression() {
+        let input = "\"hello world\";";
+
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer);
+        let program = parser.parse_program();
+
+        check_parse_errors(&parser);
+
+        assert!(program.is_some(), "parse_program() returned none");
+
+        let program = program.unwrap();
+        let type_stmt = program.statements[0]
+            .as_any()
+            .downcast_ref::<ExpressionStatement>();
+
+        assert!(
+            type_stmt.is_some(),
+            "program.statement[0] is not an expression statement"
+        );
+
+        let stmt = type_stmt.unwrap();
+        let exp = match &stmt.expression {
+            Some(expression) => {
+                let exp = expression.as_any();
+                exp.downcast_ref::<StringLiteral>()
+            }
+            None => {
+                panic!("no expression found");
+            }
+        };
+
+        assert!(
+            exp.is_some(),
+            "statement.expression is not an StringLiteral expression"
+        );
+        let exp = exp.unwrap();
+
+        assert!(
+            exp.value == "hello world",
+            "ident.value not foobar, got = {}",
+            exp.value
+        );
+    }
+
+    #[test]
+    fn test_parsing_array_literals() {
+        let input = "[1, 2 * 2, 3 + 3]";
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer);
+        let program = parser.parse_program();
+        check_parse_errors(&parser);
+
+        assert!(program.is_some(), "parse_program() returned none");
+
+        let program = program.unwrap();
+        let type_stmt = program.statements[0]
+            .as_any()
+            .downcast_ref::<ExpressionStatement>();
+
+        assert!(
+            type_stmt.is_some(),
+            "program.statement[0] is not an expression statement"
+        );
+
+        let stmt = type_stmt.unwrap();
+        let array = match &stmt.expression {
+            Some(expression) => {
+                let exp = expression.as_any();
+                exp.downcast_ref::<ArrayLiteral>()
+            }
+            None => {
+                panic!("no expression found");
+            }
+        };
+        assert!(
+            array.is_some(),
+            "statement.expression is not an StringLiteral expression"
+        );
+        let array = array.unwrap();
+
+        assert!(
+            array.elements.len() == 3,
+            "arra.elements.len() not 3. got = {}",
+            array.elements.len()
+        );
+
+        test_integer_literal_helper(&array.elements[0], &1);
+        test_infix_expression(&array.elements[1], &2, "*", &2);
+        test_infix_expression(&array.elements[2], &3, "+", &3);
+    }
+
+    #[test]
+    fn test_parsing_index_expressions() {
+        let input = "myArray[1 + 1]";
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer);
+        let program = parser.parse_program();
+        check_parse_errors(&parser);
+
+        assert!(program.is_some(), "parse_program() returned none");
+
+        let program = program.unwrap();
+        let type_stmt = program.statements[0]
+            .as_any()
+            .downcast_ref::<ExpressionStatement>();
+
+        assert!(
+            type_stmt.is_some(),
+            "program.statement[0] is not an expression statement"
+        );
+
+        let stmt = type_stmt.unwrap();
+        let idx = match &stmt.expression {
+            Some(expression) => {
+                let exp = expression.as_any();
+                exp.downcast_ref::<IndexExpression>()
+            }
+            None => {
+                panic!("no expression found");
+            }
+        };
+        assert!(
+            idx.is_some(),
+            "statement.expression is not an IndexExpression expression"
+        );
+        let idx = idx.unwrap();
+
+        if !test_identifier(idx.left.as_ref().unwrap(), &"myArray") {
+            return;
+        }
+        if !test_infix_expression(&idx.index.as_ref().unwrap(), &1, "+", &1) {
+            return;
+        }
+    }
+
+    #[test]
+    fn test_parsing_hash_literal_string_key() {
+        let input = "{\"one\": 1, \"two\": 2, \"three\": 3}";
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer);
+        let program = parser.parse_program();
+        check_parse_errors(&parser);
+
+        assert!(program.is_some(), "parse_program() returned none");
+
+        let program = program.unwrap();
+        let type_stmt = program.statements[0]
+            .as_any()
+            .downcast_ref::<ExpressionStatement>();
+
+        assert!(
+            type_stmt.is_some(),
+            "program.statement[0] is not an expression statement"
+        );
+
+        let stmt = type_stmt.unwrap();
+        let hash = match &stmt.expression {
+            Some(expression) => {
+                let exp = expression.as_any();
+                exp.downcast_ref::<HashLiteral>()
+            }
+            None => {
+                panic!("no expression found");
+            }
+        };
+        assert!(
+            hash.is_some(),
+            "statement.expression is not a HashLiteral expression"
+        );
+        let hash = hash.unwrap();
+
+        assert!(
+            hash.pairs.len() == 3,
+            "hash.pairs has wrong length. got = {}",
+            hash.pairs.len()
+        );
+
+        let expected = HashMap::from([("one", 1), ("two", 2), ("three", 3)]);
+
+        for (k, v) in &hash.pairs {
+            let literal = k.as_any().downcast_ref::<ast::StringLiteral>();
+            assert!(literal.is_some(), "key is not ast.StringLiteral");
+            let literal = literal.unwrap();
+
+            let expected_val = expected.get(literal.value.as_str());
+            test_integer_literal_helper(&v, expected_val.unwrap());
+        }
+    }
+
+    #[test]
+    fn test_parsing_empty_hash_literal() {
+        let input = "{}";
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer);
+        let program = parser.parse_program();
+        check_parse_errors(&parser);
+
+        assert!(program.is_some(), "parse_program() returned none");
+
+        let program = program.unwrap();
+        let type_stmt = program.statements[0]
+            .as_any()
+            .downcast_ref::<ExpressionStatement>();
+
+        assert!(
+            type_stmt.is_some(),
+            "program.statement[0] is not an expression statement"
+        );
+
+        let stmt = type_stmt.unwrap();
+        let hash = match &stmt.expression {
+            Some(expression) => {
+                let exp = expression.as_any();
+                exp.downcast_ref::<HashLiteral>()
+            }
+            None => {
+                panic!("no expression found");
+            }
+        };
+        assert!(
+            hash.is_some(),
+            "statement.expression is not a HashLiteral expression"
+        );
+        let hash = hash.unwrap();
+
+        assert!(
+            hash.pairs.len() == 0,
+            "hash.pairs has wrong length. got = {}",
+            hash.pairs.len()
+        );
     }
 
     // HELPERS FOR THE TESTS

@@ -66,6 +66,17 @@ impl<'a> Lexer<'a> {
         self.input[position..self.position - 1].trim().to_string()
     }
 
+    fn read_string(&mut self) -> String {
+        let position = self.position;
+        loop {
+            self.read_char();
+            if self.ch == '"' || self.ch == '\x00' {
+                break;
+            }
+        }
+        self.input[position..self.position - 1].to_string()
+    }
+
     fn skip_whitespace(&mut self) {
         // important to do a while so we can skip all the
         // whitespace
@@ -114,8 +125,15 @@ impl<'a> Lexer<'a> {
             '(' => token = new_token(token::LPAREN, self.ch),
             ')' => token = new_token(token::RPAREN, self.ch),
             ',' => token = new_token(token::COMMA, self.ch),
+            ':' => token = new_token(token::COLON, self.ch),
             '{' => token = new_token(token::LBRACE, self.ch),
             '}' => token = new_token(token::RBRACE, self.ch),
+            '[' => token = new_token(token::LBRACKET, self.ch),
+            ']' => token = new_token(token::RBRACKET, self.ch),
+            '"' => {
+                token.token_type = token::STRING;
+                token.literal = self.read_string();
+            }
             '\x00' => {
                 token.literal = char::default().to_string();
                 token.token_type = token::EOF;
@@ -170,6 +188,10 @@ mod tests {
 
         10 == 10;
         10 != 9;
+        \"foobar\"
+        \"foo bar\"
+        [1, 2];
+        {\"foo\": \"bar\"}
             ";
 
         let tests = vec![
@@ -464,6 +486,58 @@ mod tests {
             Expected {
                 expected_type: token::SEMICOLON,
                 expected_literal: ";".to_string(),
+            },
+            Expected {
+                expected_type: token::STRING,
+                expected_literal: "foobar".to_string(),
+            },
+            Expected {
+                expected_type: token::STRING,
+                expected_literal: "foo bar".to_string(),
+            },
+            Expected {
+                expected_type: token::LBRACKET,
+                expected_literal: "[".to_string(),
+            },
+            Expected {
+                expected_type: token::INT,
+                expected_literal: "1".to_string(),
+            },
+            Expected {
+                expected_type: token::COMMA,
+                expected_literal: ",".to_string(),
+            },
+            Expected {
+                expected_type: token::INT,
+                expected_literal: "2".to_string(),
+            },
+            Expected {
+                expected_type: token::RBRACKET,
+                expected_literal: "]".to_string(),
+            },
+            Expected {
+                expected_type: token::SEMICOLON,
+                expected_literal: ";".to_string(),
+            },
+            Expected {
+                expected_type: token::LBRACE,
+                expected_literal: "{".to_string(),
+            },
+            Expected {
+                expected_type: token::STRING,
+                expected_literal: "foo".to_string(),
+            },
+            Expected {
+                expected_type: token::COLON,
+                expected_literal: ":".to_string(),
+            },
+            Expected {
+                expected_type: token::STRING,
+                expected_literal: "bar".to_string(),
+            },
+            Expected {
+                expected_type: token::RBRACE,
+                expected_literal: "}".to_string(),
             },
             Expected {
                 expected_type: token::EOF,
