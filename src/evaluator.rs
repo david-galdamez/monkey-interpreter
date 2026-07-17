@@ -1,0 +1,1282 @@
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
+
+use crate::{
+    ast, builtin,
+    object::{self, Hashable, Object},
+};
+
+pub fn eval(
+    node: &dyn ast::Node,
+    env: Rc<RefCell<object::Environment>>,
+) -> Box<dyn object::Object> {
+    if let Some(node) = node.as_any().downcast_ref::<ast::Program>() {
+        return eval_program(node, env);
+    } else if let Some(node) = node.as_any().downcast_ref::<ast::ExpressionStatement>() {
+        return match &node.expression {
+            Some(expr) => eval(expr.as_ref(), env),
+            None => Box::new(object::Null {}),
+        };
+    } else if let Some(node) = node.as_any().downcast_ref::<ast::IntegerLiteral>() {
+        return Box::new(object::Integer { value: node.value });
+    } else if let Some(node) = node.as_any().downcast_ref::<ast::Boolean>() {
+        return Box::new(object::Boolean { value: node.value });
+    } else if let Some(node) = node.as_any().downcast_ref::<ast::PrefixExpression>() {
+        let right = eval(
+            node.right
+                .as_ref()
+                .expect("right expression not found")
+                .as_ref(),
+            Rc::clone(&env),
+        );
+        if is_error(&*right) {
+            return right;
+        }
+        return eval_prefix_expression(&node.operator, right);
+    } else if let Some(node) = node.as_any().downcast_ref::<ast::InfixExpression>() {
+        let left = eval(
+            node.left
+                .as_ref()
+                .expect("left expression not found")
+                .as_ref(),
+            Rc::clone(&env),
+        );
+        if is_error(&*left) {
+            return left;
+        }
+        let right = eval(
+            node.right
+                .as_ref()
+                .expect("right expression not found")
+                .as_ref(),
+            Rc::clone(&env),
+        );
+        if is_error(&*right) {
+            return right;
+        }
+        return eval_infix_expression(&node.operator, left, right);
+    } else if let Some(node) = node.as_any().downcast_ref::<ast::BlockStatement>() {
+        return eval_block_statement(node, env);
+    } else if let Some(node) = node.as_any().downcast_ref::<ast::IfExpression>() {
+        return eval_if_expression(node, env);
+    } else if let Some(node) = node.as_any().downcast_ref::<ast::ReturnStatement>() {
+        let value = eval(
+            node.return_value.as_ref().unwrap().as_ref(),
+            Rc::clone(&env),
+        );
+        if is_error(&*value) {
+            return value;
+        }
+        return Box::new(object::ReturnValue { value });
+    } else if let Some(node) = node.as_any().downcast_ref::<ast::LetStatement>() {
+        let value = eval(node.value.as_ref().unwrap().as_ref(), Rc::clone(&env));
+        if is_error(&*value) {
+            return value;
+        }
+        env.borrow_mut().set(node.name.value.clone(), value);
+    } else if let Some(node) = node.as_any().downcast_ref::<ast::Identifier>() {
+        let result = env.borrow().get(&node.value);
+        if let Some(res) = result {
+            return res.clone_box();
+        }
+
+        let builtin = builtin::builtins(&node.value);
+        if let Some(bltn) = builtin {
+            return bltn.clone_box();
+        }
+
+        return new_error(format!("identifier not found: {}", node.value));
+    } else if let Some(node) = node.as_any().downcast_ref::<ast::FunctionLiteral>() {
+        return Box::new(object::Function {
+            parameters: node.parameters.clone(),
+            body: node.body.clone().unwrap(),
+            env: Rc::clone(&env),
+        });
+    } else if let Some(node) = node.as_any().downcast_ref::<ast::CallExpression>() {
+        let function = eval(node.function.as_ref().unwrap().as_ref(), Rc::clone(&env));
+        if is_error(&*function) {
+            return function;
+        }
+        let args = eval_expressions(&node.arguments, Rc::clone(&env));
+        if args.len() == 1 && is_error(&*args[0]) {
+            return args[0].clone_box();
+        }
+        return apply_function(function, args);
+    } else if let Some(node) = node.as_any().downcast_ref::<ast::StringLiteral>() {
+        return Box::new(object::StringObject {
+            value: node.value.clone(),
+        });
+    } else if let Some(node) = node.as_any().downcast_ref::<ast::ArrayLiteral>() {
+        let elements = eval_expressions(&node.elements, Rc::clone(&env));
+        if elements.len() == 1 && is_error(&*elements[0]) {
+            return elements[0].clone_box();
+        }
+        return Box::new(object::Array { elements });
+    } else if let Some(node) = node.as_any().downcast_ref::<ast::IndexExpression>() {
+        let left = eval(node.left.as_ref().unwrap().as_ref(), Rc::clone(&env));
+        if is_error(&*left) {
+            return left;
+        }
+        let index = eval(node.index.as_ref().unwrap().as_ref(), Rc::clone(&env));
+        if is_error(&*index) {
+            return index;
+        }
+        return eval_index_expression(left, index);
+    } else if let Some(node) = node.as_any().downcast_ref::<ast::HashLiteral>() {
+        return eval_hash_literal(node, Rc::clone(&env));
+    }
+
+    Box::new(object::Null)
+}
+
+fn eval_program(
+    program: &ast::Program,
+    env: Rc<RefCell<object::Environment>>,
+) -> Box<dyn object::Object> {
+    let mut result: Box<dyn object::Object> = Box::new(object::Null);
+
+    for statement in &program.statements {
+        result = eval(statement.as_ref(), Rc::clone(&env));
+
+        if result
+            .as_any()
+            .downcast_ref::<object::ReturnValue>()
+            .is_some()
+        {
+            let return_value = result.into_any().downcast::<object::ReturnValue>().unwrap();
+            return return_value.value;
+        } else if result.as_any().downcast_ref::<object::Error>().is_some() {
+            return result;
+        }
+    }
+
+    result
+}
+
+fn eval_block_statement(
+    block: &ast::BlockStatement,
+    env: Rc<RefCell<object::Environment>>,
+) -> Box<dyn object::Object> {
+    let mut result: Box<dyn object::Object> = Box::new(object::Null);
+
+    for stmt in &block.statements {
+        result = eval(stmt.as_ref(), Rc::clone(&env));
+
+        let result_type = result.object_type();
+        if result_type == object::RETURN_VALUE_OBJ || result_type == object::ERROR_OBJ {
+            return result;
+        }
+    }
+
+    result
+}
+
+fn eval_if_expression(
+    node: &ast::IfExpression,
+    env: Rc<RefCell<object::Environment>>,
+) -> Box<dyn object::Object> {
+    let condition = eval(node.condition.as_ref().unwrap().as_ref(), Rc::clone(&env));
+    if is_error(&*condition) {
+        return condition;
+    }
+
+    if is_truthy(condition) {
+        eval(node.consequence.as_ref().unwrap(), Rc::clone(&env))
+    } else if node.alternative.is_some() {
+        eval(node.alternative.as_ref().unwrap(), env)
+    } else {
+        Box::new(object::Null {})
+    }
+}
+
+fn eval_expressions(
+    exps: &[Box<dyn ast::Expression>],
+    env: Rc<RefCell<object::Environment>>,
+) -> Vec<Box<dyn object::Object>> {
+    let mut result = Vec::new();
+
+    for exp in exps {
+        let evaluated = eval(exp.as_ref(), Rc::clone(&env));
+        if is_error(&*evaluated) {
+            return vec![evaluated];
+        }
+        result.push(evaluated);
+    }
+
+    result
+}
+
+fn eval_hash_literal(
+    node: &ast::HashLiteral,
+    env: Rc<RefCell<object::Environment>>,
+) -> Box<dyn object::Object> {
+    let mut pairs = HashMap::new();
+
+    for (key_node, val_node) in &node.pairs {
+        let key = eval(key_node.as_ref(), Rc::clone(&env));
+        if is_error(&*key) {
+            return key;
+        }
+
+        let hash_key = match hash_key_for(&*key) {
+            Some(hash_key) => hash_key,
+            None => return new_error(format!("unusable as hash key: {}", key.object_type())),
+        };
+
+        let value = eval(val_node.as_ref(), Rc::clone(&env));
+        if is_error(&*value) {
+            return value;
+        }
+
+        pairs.insert(hash_key, object::HashPair { key, value });
+    }
+
+    Box::new(object::HashObject { pairs })
+}
+
+fn hash_key_for(obj: &dyn object::Object) -> Option<object::HashKey> {
+    if let Some(int) = obj.as_any().downcast_ref::<object::Integer>() {
+        Some(int.hash_key())
+    } else if let Some(boolean) = obj.as_any().downcast_ref::<object::Boolean>() {
+        Some(boolean.hash_key())
+    } else {
+        obj.as_any()
+            .downcast_ref::<object::StringObject>()
+            .map(|string| string.hash_key())
+    }
+}
+
+fn eval_index_expression(
+    left: Box<dyn object::Object>,
+    index: Box<dyn object::Object>,
+) -> Box<dyn object::Object> {
+    if left.object_type() == object::ARRAY_OBJ && index.object_type() == object::INTEGER_OBJ {
+        return eval_array_index_expression(left, index);
+    } else if left.object_type() == object::HASH_OBJ {
+        return eval_hash_index_expression(left, index);
+    }
+
+    new_error(format!(
+        "index operator not supported: {}",
+        left.object_type()
+    ))
+}
+
+fn eval_array_index_expression(
+    array: Box<dyn object::Object>,
+    index: Box<dyn object::Object>,
+) -> Box<dyn object::Object> {
+    let array_obj = array.as_any().downcast_ref::<object::Array>().unwrap();
+    let idx = index
+        .as_any()
+        .downcast_ref::<object::Integer>()
+        .unwrap()
+        .value;
+    let max = (array_obj.elements.len() - 1) as i64;
+
+    if idx < 0 || idx > max {
+        return Box::new(object::Null);
+    }
+
+    array_obj.elements[idx as usize].clone_box()
+}
+
+fn eval_hash_index_expression(
+    hash: Box<dyn object::Object>,
+    index: Box<dyn object::Object>,
+) -> Box<dyn object::Object> {
+    let hash_obj = hash.as_any().downcast_ref::<object::HashObject>().unwrap();
+    let hash_key = match hash_key_for(&*index) {
+        Some(hash_key) => hash_key,
+        None => return new_error(format!("unusable as hash key: {}", index.object_type())),
+    };
+
+    match hash_obj.pairs.get(&hash_key) {
+        Some(pair) => pair.value.clone_box(),
+        None => Box::new(object::Null),
+    }
+}
+
+fn apply_function(
+    func: Box<dyn object::Object>,
+    args: Vec<Box<dyn object::Object>>,
+) -> Box<dyn object::Object> {
+    if func.object_type() == object::BUILTIN_OBJ {
+        let func = func.into_any().downcast::<object::Builtin>().unwrap();
+
+        return (func.func)(&args);
+    }
+
+    if func.object_type() != object::FUNCTION_OBJ {
+        return new_error(format!("not a function: {}", func.object_type()));
+    }
+
+    let func = func.into_any().downcast::<object::Function>().unwrap();
+    let extended_env = extend_function_env(&func, args);
+    let evaluated = eval(&func.body, extended_env);
+    unwrap_return_value(evaluated)
+}
+
+fn extend_function_env(
+    func: &object::Function,
+    args: Vec<Box<dyn object::Object>>,
+) -> Rc<RefCell<object::Environment>> {
+    let env = object::Environment::new_enclosed(Rc::clone(&func.env));
+
+    for (i, param) in func.parameters.iter().enumerate() {
+        env.borrow_mut()
+            .set(param.value.clone(), args[i].clone_box());
+    }
+
+    env
+}
+
+fn unwrap_return_value(obj: Box<dyn object::Object>) -> Box<dyn object::Object> {
+    if obj.object_type() == object::RETURN_VALUE_OBJ {
+        return obj
+            .into_any()
+            .downcast::<object::ReturnValue>()
+            .unwrap()
+            .value;
+    }
+    obj
+}
+
+fn is_truthy(obj: Box<dyn object::Object>) -> bool {
+    if let Some(obj) = obj.as_any().downcast_ref::<object::Boolean>() {
+        obj.value
+    } else {
+        obj.as_any().downcast_ref::<object::Null>().is_none()
+    }
+}
+
+fn eval_prefix_expression(
+    operator: &str,
+    right: Box<dyn object::Object>,
+) -> Box<dyn object::Object> {
+    match operator {
+        "!" => eval_bang_operator_expression(right),
+        "-" => eval_minus_prefix_operator_expression(right),
+        _other => new_error(format!(
+            "unknown operator: {}{}",
+            operator,
+            right.object_type()
+        )),
+    }
+}
+
+fn eval_infix_expression(
+    operator: &str,
+    left: Box<dyn object::Object>,
+    right: Box<dyn object::Object>,
+) -> Box<dyn object::Object> {
+    if left.object_type() == object::INTEGER_OBJ && right.object_type() == object::INTEGER_OBJ {
+        return eval_integer_infix_expression(operator, left, right);
+    }
+
+    if left.object_type() == object::STRING_OBJ && right.object_type() == object::STRING_OBJ {
+        return eval_string_infix_expression(operator, left, right);
+    }
+
+    if left.object_type() != right.object_type() {
+        return new_error(format!(
+            "type mismatch: {} {} {}",
+            left.object_type(),
+            operator,
+            right.object_type()
+        ));
+    }
+
+    let left_val = left
+        .as_any()
+        .downcast_ref::<object::Boolean>()
+        .expect("left object boolean not found")
+        .value;
+
+    let right_val = right
+        .as_any()
+        .downcast_ref::<object::Boolean>()
+        .expect("right object boolean not found")
+        .value;
+
+    match operator {
+        "==" => Box::new(object::Boolean {
+            value: left_val == right_val,
+        }),
+        "!=" => Box::new(object::Boolean {
+            value: left_val != right_val,
+        }),
+        _ => new_error(format!(
+            "unknown operator: {} {} {}",
+            left.object_type(),
+            operator,
+            right.object_type()
+        )),
+    }
+}
+
+fn eval_integer_infix_expression(
+    operator: &str,
+    left: Box<dyn object::Object>,
+    right: Box<dyn object::Object>,
+) -> Box<dyn object::Object> {
+    let left_val = left
+        .as_any()
+        .downcast_ref::<object::Integer>()
+        .expect("left object integer not found")
+        .value;
+
+    let right_val = right
+        .as_any()
+        .downcast_ref::<object::Integer>()
+        .expect("right object integer not found")
+        .value;
+
+    match operator {
+        "+" => Box::new(object::Integer {
+            value: left_val + right_val,
+        }),
+        "-" => Box::new(object::Integer {
+            value: left_val - right_val,
+        }),
+        "*" => Box::new(object::Integer {
+            value: left_val * right_val,
+        }),
+        "/" => Box::new(object::Integer {
+            value: left_val / right_val,
+        }),
+        "<" => Box::new(object::Boolean {
+            value: left_val < right_val,
+        }),
+        ">" => Box::new(object::Boolean {
+            value: left_val > right_val,
+        }),
+        "==" => Box::new(object::Boolean {
+            value: left_val == right_val,
+        }),
+        "!=" => Box::new(object::Boolean {
+            value: left_val != right_val,
+        }),
+        _other => new_error(format!(
+            "unknown operator: {} {} {}",
+            left.object_type(),
+            operator,
+            right.object_type()
+        )),
+    }
+}
+
+fn eval_string_infix_expression(
+    operator: &str,
+    left: Box<dyn object::Object>,
+    right: Box<dyn object::Object>,
+) -> Box<dyn object::Object> {
+    if operator != "+" {
+        return new_error(format!(
+            "unknown operator: {} {} {}",
+            left.object_type(),
+            operator,
+            right.object_type()
+        ));
+    }
+
+    let left_val = &left
+        .as_any()
+        .downcast_ref::<object::StringObject>()
+        .expect("left object integer not found")
+        .value;
+
+    let right_val = &right
+        .as_any()
+        .downcast_ref::<object::StringObject>()
+        .expect("right object integer not found")
+        .value;
+
+    Box::new(object::StringObject {
+        value: format!("{}{}", left_val, right_val),
+    })
+}
+
+fn eval_minus_prefix_operator_expression(
+    right: Box<dyn object::Object>,
+) -> Box<dyn object::Object> {
+    if right.object_type() != object::INTEGER_OBJ {
+        return new_error(format!("unknown operator: -{}", right.object_type()));
+    }
+
+    let value = right
+        .as_any()
+        .downcast_ref::<object::Integer>()
+        .expect("object integer not found")
+        .value;
+
+    Box::new(object::Integer { value: -value })
+}
+
+fn eval_bang_operator_expression(right: Box<dyn object::Object>) -> Box<dyn object::Object> {
+    if let Some(obj) = right.as_any().downcast_ref::<object::Boolean>() {
+        Box::new(object::Boolean { value: !obj.value })
+    } else if right.as_any().downcast_ref::<object::Null>().is_some() {
+        Box::new(object::Boolean { value: true })
+    } else {
+        Box::new(object::Boolean { value: false })
+    }
+}
+
+pub fn new_error(message: String) -> Box<object::Error> {
+    Box::new(object::Error { message })
+}
+
+fn is_error(obj: &dyn object::Object) -> bool {
+    obj.object_type() == object::ERROR_OBJ
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{any::Any, cell::RefCell, collections::HashMap, rc::Rc, vec};
+
+    use crate::{
+        evaluator::eval,
+        lexer,
+        object::{self, Hashable},
+        parser,
+    };
+
+    struct EvalInteger<'a> {
+        input: &'a str,
+        expected: i64,
+    }
+
+    #[test]
+    fn test_eval_integer_expression() {
+        let tests = vec![
+            EvalInteger {
+                input: "5",
+                expected: 5,
+            },
+            EvalInteger {
+                input: "10",
+                expected: 10,
+            },
+            EvalInteger {
+                input: "-5",
+                expected: -5,
+            },
+            EvalInteger {
+                input: "-10",
+                expected: -10,
+            },
+            EvalInteger {
+                input: "5 + 5 + 5 + 5 - 10",
+                expected: 10,
+            },
+            EvalInteger {
+                input: "2 * 2 * 2 * 2 * 2",
+                expected: 32,
+            },
+            EvalInteger {
+                input: "-50 + 100 + -50",
+                expected: 0,
+            },
+            EvalInteger {
+                input: "5 * 2 + 10",
+                expected: 20,
+            },
+            EvalInteger {
+                input: "5 + 2 * 10",
+                expected: 25,
+            },
+            EvalInteger {
+                input: "20 + 2 * -10",
+                expected: 0,
+            },
+            EvalInteger {
+                input: "50 / 2 * 2 + 10",
+                expected: 60,
+            },
+            EvalInteger {
+                input: "2 * (5 + 10)",
+                expected: 30,
+            },
+            EvalInteger {
+                input: "3 * 3 * 3 + 10",
+                expected: 37,
+            },
+            EvalInteger {
+                input: "3 * (3 * 3) + 10",
+                expected: 37,
+            },
+            EvalInteger {
+                input: "(5 + 10 * 2 + 15 / 3) * 2 + -10",
+                expected: 50,
+            },
+        ];
+
+        for test in tests {
+            let evaluated = test_eval(test.input);
+            test_integer_object(evaluated, test.expected);
+        }
+    }
+
+    struct EvalBoolean<'a> {
+        input: &'a str,
+        expected: bool,
+    }
+
+    #[test]
+    fn test_eval_boolean_expression() {
+        let tests = vec![
+            EvalBoolean {
+                input: "true",
+                expected: true,
+            },
+            EvalBoolean {
+                input: "false",
+                expected: false,
+            },
+            EvalBoolean {
+                input: "1 < 2",
+                expected: true,
+            },
+            EvalBoolean {
+                input: "1 > 2",
+                expected: false,
+            },
+            EvalBoolean {
+                input: "1 < 1",
+                expected: false,
+            },
+            EvalBoolean {
+                input: "1 > 1",
+                expected: false,
+            },
+            EvalBoolean {
+                input: "1 == 1",
+                expected: true,
+            },
+            EvalBoolean {
+                input: "1 != 1",
+                expected: false,
+            },
+            EvalBoolean {
+                input: "1 == 2",
+                expected: false,
+            },
+            EvalBoolean {
+                input: "1 != 2",
+                expected: true,
+            },
+            EvalBoolean {
+                input: "true == true",
+                expected: true,
+            },
+            EvalBoolean {
+                input: "false == false",
+                expected: true,
+            },
+            EvalBoolean {
+                input: "true == false",
+                expected: false,
+            },
+            EvalBoolean {
+                input: "true != false",
+                expected: true,
+            },
+            EvalBoolean {
+                input: "false != true",
+                expected: true,
+            },
+            EvalBoolean {
+                input: "(1 < 2) == true",
+                expected: true,
+            },
+        ];
+
+        for test in tests {
+            let evaluated = test_eval(test.input);
+            test_boolean_object(evaluated, test.expected);
+        }
+    }
+
+    #[test]
+    fn test_bang_operator() {
+        let tests = vec![
+            EvalBoolean {
+                input: "!true",
+                expected: false,
+            },
+            EvalBoolean {
+                input: "!false",
+                expected: true,
+            },
+            EvalBoolean {
+                input: "!5",
+                expected: false,
+            },
+            EvalBoolean {
+                input: "!!true",
+                expected: true,
+            },
+            EvalBoolean {
+                input: "!!false",
+                expected: false,
+            },
+            EvalBoolean {
+                input: "!!5",
+                expected: true,
+            },
+        ];
+
+        for test in tests {
+            let evaluated = test_eval(test.input);
+            test_boolean_object(evaluated, test.expected);
+        }
+    }
+
+    struct ExpectIfElse<'a> {
+        input: &'a str,
+        expected: &'a dyn Any,
+    }
+
+    #[test]
+    fn test_if_else_expression() {
+        let tests = vec![
+            ExpectIfElse {
+                input: "if (true) { 10 }",
+                expected: &10i64,
+            },
+            ExpectIfElse {
+                input: "if (false) { 10 }",
+                expected: &object::Null {},
+            },
+            ExpectIfElse {
+                input: "if (1) { 10 }",
+                expected: &10i64,
+            },
+            ExpectIfElse {
+                input: "if (1 < 2) { 10 }",
+                expected: &10i64,
+            },
+            ExpectIfElse {
+                input: "if (1 > 2) { 10 }",
+                expected: &object::Null {},
+            },
+            ExpectIfElse {
+                input: "if (1 > 2) { 10 } else { 20 }",
+                expected: &20i64,
+            },
+            ExpectIfElse {
+                input: "if (1 < 2) { 10 } else { 20 }",
+                expected: &10i64,
+            },
+        ];
+
+        for test in tests {
+            let evaluated = test_eval(test.input);
+            let is_integer = test.expected.downcast_ref::<i64>();
+
+            if let Some(int) = is_integer {
+                test_integer_object(evaluated, *int);
+            } else {
+                test_null_object(evaluated);
+            }
+        }
+    }
+
+    #[test]
+    fn test_return_statements() {
+        let tests = vec![
+            EvalInteger {
+                input: "return 10;",
+                expected: 10,
+            },
+            EvalInteger {
+                input: "return 10; 9;",
+                expected: 10,
+            },
+            EvalInteger {
+                input: "return 2 * 5; 9;",
+                expected: 10,
+            },
+            EvalInteger {
+                input: "9; return 2 * 5; 9;",
+                expected: 10,
+            },
+            EvalInteger {
+                input: "if (10 > 1) {
+                    if (10 > 1) {
+                        return 10;
+                    }
+                    return 1;
+                }",
+                expected: 10,
+            },
+        ];
+
+        for test in tests {
+            let evaluated = test_eval(test.input);
+            test_integer_object(evaluated, test.expected);
+        }
+    }
+
+    struct ExpectError<'a> {
+        input: &'a str,
+        expected_message: &'a str,
+    }
+
+    #[test]
+    fn test_error_handling() {
+        let tests = vec![
+            ExpectError {
+                input: "5 + true;",
+                expected_message: "type mismatch: INTEGER + BOOLEAN",
+            },
+            ExpectError {
+                input: "5 + true; 5;",
+                expected_message: "type mismatch: INTEGER + BOOLEAN",
+            },
+            ExpectError {
+                input: "-true",
+                expected_message: "unknown operator: -BOOLEAN",
+            },
+            ExpectError {
+                input: "true + false;",
+                expected_message: "unknown operator: BOOLEAN + BOOLEAN",
+            },
+            ExpectError {
+                input: "5; true + false; 5;",
+                expected_message: "unknown operator: BOOLEAN + BOOLEAN",
+            },
+            ExpectError {
+                input: "if (10 > 1) { true + false; }",
+                expected_message: "unknown operator: BOOLEAN + BOOLEAN",
+            },
+            ExpectError {
+                input: "if (10 > 1) {
+                    if (10 > 1) {
+                        return true + false;
+                    }
+                    return 1;
+                }",
+                expected_message: "unknown operator: BOOLEAN + BOOLEAN",
+            },
+            ExpectError {
+                input: "foobar",
+                expected_message: "identifier not found: foobar",
+            },
+            ExpectError {
+                input: "\"Hello\" - \"World!\"",
+                expected_message: "unknown operator: STRING - STRING",
+            },
+            ExpectError {
+                input: "{\"name\": \"Monkey\"}[fn(x) { x }];",
+                expected_message: "unusable as hash key: FUNCTION",
+            },
+        ];
+
+        for test in tests {
+            let evaluated = test_eval(test.input);
+
+            let err_obj = evaluated.as_any().downcast_ref::<object::Error>();
+            assert!(err_obj.is_some(), "no error object returned");
+
+            let err_obj = err_obj.unwrap();
+            assert_eq!(
+                err_obj.message, test.expected_message,
+                "wrong error message, expected = {}, got = {}",
+                test.expected_message, err_obj.message
+            )
+        }
+    }
+
+    #[test]
+    fn test_let_statements() {
+        let tests = vec![
+            EvalInteger {
+                input: "let a = 5; a;",
+                expected: 5,
+            },
+            EvalInteger {
+                input: "let a = 5 * 5; a;",
+                expected: 25,
+            },
+            EvalInteger {
+                input: "let a = 5; let b = a; b;",
+                expected: 5,
+            },
+            EvalInteger {
+                input: "let a = 5; let b = a; let c = a + b + 5; c;",
+                expected: 15,
+            },
+        ];
+
+        for test in tests {
+            let evaluated = test_eval(test.input);
+            test_integer_object(evaluated, test.expected);
+        }
+    }
+
+    #[test]
+    fn test_function_object() {
+        let input = "fn(x) { x + 2; };";
+        let evaluated = test_eval(input);
+
+        let func = evaluated.as_any().downcast_ref::<object::Function>();
+        assert!(func.is_some(), "object is not a Function");
+
+        let func = func.unwrap();
+        assert_eq!(
+            func.parameters.len(),
+            1,
+            "function has wrong number of parameters"
+        );
+        assert_eq!(func.parameters[0].value, "x", "parameter is not 'x'");
+        assert_eq!(format!("{}", func.body), "(x + 2)", "body is not (x + 2)");
+    }
+
+    #[test]
+    fn test_function_application() {
+        let tests = vec![
+            EvalInteger {
+                input: "let identity = fn(x) { x; }; identity(5);",
+                expected: 5,
+            },
+            EvalInteger {
+                input: "let identity = fn(x) { return x; }; identity(5);",
+                expected: 5,
+            },
+            EvalInteger {
+                input: "let double = fn(x) { x * 2; }; double(5);",
+                expected: 10,
+            },
+            EvalInteger {
+                input: "let add = fn(x, y) { x + y; }; add(5, 5);",
+                expected: 10,
+            },
+            EvalInteger {
+                input: "let add = fn(x, y) { x + y; }; add(5 + 5, add(5, 5));",
+                expected: 20,
+            },
+            EvalInteger {
+                input: "fn(x) { x; }(5)",
+                expected: 5,
+            },
+        ];
+
+        for test in tests {
+            let evaluated = test_eval(test.input);
+            test_integer_object(evaluated, test.expected);
+        }
+    }
+
+    #[test]
+    fn test_closures() {
+        let input = "
+            let new_adder = fn(x) {
+                fn(y) { x + y };
+            };
+            let add_two = new_adder(2);
+            add_two(3);
+        ";
+        let evaluated = test_eval(input);
+        test_integer_object(evaluated, 5);
+    }
+
+    #[test]
+    fn test_string_literal() {
+        let input = "\"Hello World!\"";
+
+        let evaluated = test_eval(input);
+        let eval = evaluated.as_any().downcast_ref::<object::StringObject>();
+        assert!(eval.is_some(), "object is not a string");
+        let eval = eval.unwrap();
+
+        assert_eq!(eval.value, "Hello World!", "String has wrong value");
+    }
+
+    #[test]
+    fn test_string_concatenation() {
+        let input = "\"Hello\" + \" \" + \"World!\"";
+
+        let evaluated = test_eval(input);
+        let eval = evaluated.as_any().downcast_ref::<object::StringObject>();
+        assert!(eval.is_some(), "object is not a string");
+        let eval = eval.unwrap();
+
+        assert_eq!(eval.value, "Hello World!", "String has wrong value");
+    }
+
+    #[test]
+    fn test_builtin_functions() {
+        let tests = vec![
+            ExpectIfElse {
+                input: "len(\"\")",
+                expected: &0,
+            },
+            ExpectIfElse {
+                input: "len(\"four\")",
+                expected: &4,
+            },
+            ExpectIfElse {
+                input: "len(\"hello world\")",
+                expected: &11,
+            },
+            ExpectIfElse {
+                input: "len(1)",
+                expected: &"argument to \"len\" not supported, got INTEGER",
+            },
+            ExpectIfElse {
+                input: "len(\"one\", \"two\")",
+                expected: &"wrong number of arguments. got=2, want=1",
+            },
+        ];
+
+        for test in tests {
+            let evaluated = test_eval(test.input);
+            if test.expected.is::<i64>() {
+                test_integer_object(evaluated, *test.expected.downcast_ref::<i64>().unwrap());
+            } else if test.expected.is::<String>() {
+                let expected = test.expected.downcast_ref::<String>().unwrap();
+                let err_obj = evaluated.as_any().downcast_ref::<object::Error>();
+                assert!(err_obj.is_some(), "object is not Error.");
+                let err_obj = err_obj.unwrap();
+                assert_eq!(
+                    err_obj.message, *expected,
+                    "wrong error message. expected={}, got={}",
+                    *expected, err_obj.message
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_array_literal() {
+        let input = "[1, 2 * 2, 3 + 3]";
+
+        let evaluated = test_eval(input);
+        let eval = evaluated.as_any().downcast_ref::<object::Array>();
+        assert!(eval.is_some(), "object is not an array");
+        let eval = eval.unwrap();
+
+        assert_eq!(
+            eval.elements.len(),
+            3,
+            "array has wrong number of elements. got={}",
+            eval.elements.len()
+        );
+
+        test_integer_object(eval.elements[0].clone_box(), 1);
+        test_integer_object(eval.elements[1].clone_box(), 4);
+        test_integer_object(eval.elements[2].clone_box(), 6);
+    }
+
+    #[test]
+    fn test_array_index_expressions() {
+        let tests = vec![
+            ExpectIfElse {
+                input: "[1, 2, 3][0]",
+                expected: &1,
+            },
+            ExpectIfElse {
+                input: "[1, 2, 3][1]",
+                expected: &2,
+            },
+            ExpectIfElse {
+                input: "[1, 2, 3][2]",
+                expected: &3,
+            },
+            ExpectIfElse {
+                input: "let i = 0; [1][i]",
+                expected: &1,
+            },
+            ExpectIfElse {
+                input: "[1, 2, 3][1 + 1]",
+                expected: &3,
+            },
+            ExpectIfElse {
+                input: "let myArray = [1, 2, 3]; myArray[2];",
+                expected: &3,
+            },
+            ExpectIfElse {
+                input: "let myArray = [1, 2, 3]; myArray[0] + myArray[1] + myArray[2];",
+                expected: &6,
+            },
+            ExpectIfElse {
+                input: "let myArray = [1, 2, 3]; let i = myArray[0]; myArray[i];",
+                expected: &2,
+            },
+            ExpectIfElse {
+                input: "[1, 2, 3][3]",
+                expected: &object::Null,
+            },
+            ExpectIfElse {
+                input: "[1, 2, 3][-1]",
+                expected: &object::Null,
+            },
+        ];
+
+        for test in tests {
+            let evaluated = test_eval(test.input);
+            if let Some(eval) = evaluated.as_any().downcast_ref::<i64>() {
+                test_integer_object(evaluated.clone_box(), *eval);
+            } else {
+                test_null_object(evaluated.clone_box());
+            }
+        }
+    }
+
+    #[test]
+    fn test_hash_literal() {
+        let input = "let two = \"two\";
+            {
+                \"one\": 10 - 9,
+                two: 1 + 1,
+                \"thr\" + \"ee\": 6 / 2,
+                4: 4,
+                true: 5,
+                false: 6
+            }
+        ";
+
+        let evaluated = test_eval(input);
+        let eval = evaluated.as_any().downcast_ref::<object::HashObject>();
+        assert!(eval.is_some(), "eval didn't return hash");
+        let eval = eval.unwrap();
+
+        let expected = HashMap::from([
+            (
+                object::StringObject {
+                    value: "one".to_string(),
+                }
+                .hash_key(),
+                1,
+            ),
+            (
+                object::StringObject {
+                    value: "two".to_string(),
+                }
+                .hash_key(),
+                2,
+            ),
+            (
+                object::StringObject {
+                    value: "three".to_string(),
+                }
+                .hash_key(),
+                3,
+            ),
+            (object::Integer { value: 4 }.hash_key(), 4),
+            (object::Boolean { value: true }.hash_key(), 5),
+            (object::Boolean { value: false }.hash_key(), 6),
+        ]);
+
+        assert_eq!(
+            eval.pairs.len(),
+            expected.len(),
+            "hash has wrong num of pairs"
+        );
+
+        for (ek, ev) in &expected {
+            let pair = match eval.pairs.get(ek) {
+                Some(p) => p,
+                None => {
+                    eprintln!("no pair for given key in pairs");
+                    return;
+                }
+            };
+
+            test_integer_object(pair.value.clone_box(), *ev);
+        }
+    }
+
+    #[test]
+    fn test_hash_index_expressions() {
+        let tests = vec![
+            ExpectIfElse {
+                input: "{\"foo\": 5}[\"foo\"]",
+                expected: &5,
+            },
+            ExpectIfElse {
+                input: "{\"foo\": 5}[\"bar\"]",
+                expected: &object::Null,
+            },
+            ExpectIfElse {
+                input: "let key = \"foo\"; {\"foo\": 5}[key]",
+                expected: &5,
+            },
+            ExpectIfElse {
+                input: "{}[\"foo\"]",
+                expected: &object::Null,
+            },
+            ExpectIfElse {
+                input: "{5: 5}[5]",
+                expected: &5,
+            },
+            ExpectIfElse {
+                input: "{true: 5}[true]",
+                expected: &5,
+            },
+            ExpectIfElse {
+                input: "{false: 5}[false]",
+                expected: &5,
+            },
+        ];
+
+        for test in tests {
+            let evaluated = test_eval(test.input);
+            if let Some(eval) = evaluated.as_any().downcast_ref::<i64>() {
+                test_integer_object(evaluated.clone_box(), *eval);
+            } else {
+                test_null_object(evaluated.clone_box());
+            }
+        }
+    }
+
+    fn test_null_object(obj: Box<dyn object::Object>) -> bool {
+        if obj.object_type() != object::NULL_OBJ {
+            eprintln!("object is not null, got = {}", obj.object_type());
+            return false;
+        }
+        true
+    }
+
+    fn test_eval(input: &str) -> Box<dyn object::Object> {
+        let lexer = lexer::Lexer::new(input);
+        let mut parser = parser::Parser::new(lexer);
+        let program = parser.parse_program().unwrap();
+        let env = Rc::new(RefCell::new(object::Environment::new()));
+
+        eval(&program, env)
+    }
+
+    fn test_integer_object(obj: Box<dyn object::Object>, expected: i64) -> bool {
+        let result = obj.as_any().downcast_ref::<object::Integer>();
+
+        assert!(result.is_some(), "object is not an integer");
+
+        let result = result.unwrap();
+
+        assert_eq!(
+            result.value, expected,
+            "object has wrong value, got = {}, want = {}",
+            result.value, expected
+        );
+
+        true
+    }
+
+    fn test_boolean_object(obj: Box<dyn object::Object>, expected: bool) -> bool {
+        let result = obj.as_any().downcast_ref::<object::Boolean>();
+
+        assert!(result.is_some(), "object is not a boolean");
+
+        let result = result.unwrap();
+
+        assert_eq!(
+            result.value, expected,
+            "object has wrong value, got = {}, want = {}",
+            result.value, expected
+        );
+
+        true
+    }
+}
