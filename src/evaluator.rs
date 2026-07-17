@@ -1,8 +1,8 @@
-use std::{any::Any, cell::RefCell, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use crate::{
     ast, builtin,
-    object::{self, Object},
+    object::{self, Hashable, Object},
 };
 
 pub fn eval(
@@ -28,7 +28,7 @@ pub fn eval(
                 .as_ref(),
             Rc::clone(&env),
         );
-        if is_error(&right) {
+        if is_error(&*right) {
             return right;
         }
         return eval_prefix_expression(&node.operator, right);
@@ -40,7 +40,7 @@ pub fn eval(
                 .as_ref(),
             Rc::clone(&env),
         );
-        if is_error(&left) {
+        if is_error(&*left) {
             return left;
         }
         let right = eval(
@@ -50,7 +50,7 @@ pub fn eval(
                 .as_ref(),
             Rc::clone(&env),
         );
-        if is_error(&right) {
+        if is_error(&*right) {
             return right;
         }
         return eval_infix_expression(&node.operator, left, right);
@@ -63,13 +63,13 @@ pub fn eval(
             node.return_value.as_ref().unwrap().as_ref(),
             Rc::clone(&env),
         );
-        if is_error(&value) {
+        if is_error(&*value) {
             return value;
         }
         return Box::new(object::ReturnValue { value });
     } else if let Some(node) = node.as_any().downcast_ref::<ast::LetStatement>() {
         let value = eval(node.value.as_ref().unwrap().as_ref(), Rc::clone(&env));
-        if is_error(&value) {
+        if is_error(&*value) {
             return value;
         }
         env.borrow_mut().set(node.name.value.clone(), value);
@@ -93,11 +93,11 @@ pub fn eval(
         });
     } else if let Some(node) = node.as_any().downcast_ref::<ast::CallExpression>() {
         let function = eval(node.function.as_ref().unwrap().as_ref(), Rc::clone(&env));
-        if is_error(&function) {
+        if is_error(&*function) {
             return function;
         }
         let args = eval_expressions(&node.arguments, Rc::clone(&env));
-        if args.len() == 1 && is_error(&args[0]) {
+        if args.len() == 1 && is_error(&*args[0]) {
             return args[0].clone_box();
         }
         return apply_function(function, args);
@@ -107,20 +107,22 @@ pub fn eval(
         });
     } else if let Some(node) = node.as_any().downcast_ref::<ast::ArrayLiteral>() {
         let elements = eval_expressions(&node.elements, Rc::clone(&env));
-        if elements.len() == 1 && is_error(&elements[0]) {
+        if elements.len() == 1 && is_error(&*elements[0]) {
             return elements[0].clone_box();
         }
         return Box::new(object::Array { elements });
     } else if let Some(node) = node.as_any().downcast_ref::<ast::IndexExpression>() {
         let left = eval(node.left.as_ref().unwrap().as_ref(), Rc::clone(&env));
-        if is_error(&left) {
+        if is_error(&*left) {
             return left;
         }
         let index = eval(node.index.as_ref().unwrap().as_ref(), Rc::clone(&env));
-        if is_error(&index) {
+        if is_error(&*index) {
             return index;
         }
         return eval_index_expression(left, index);
+    } else if let Some(node) = node.as_any().downcast_ref::<ast::HashLiteral>() {
+        return eval_hash_literal(node, Rc::clone(&env));
     }
 
     Box::new(object::Null)
@@ -173,7 +175,7 @@ fn eval_if_expression(
     env: Rc<RefCell<object::Environment>>,
 ) -> Box<dyn object::Object> {
     let condition = eval(node.condition.as_ref().unwrap().as_ref(), Rc::clone(&env));
-    if is_error(&condition) {
+    if is_error(&*condition) {
         return condition;
     }
 
@@ -194,7 +196,7 @@ fn eval_expressions(
 
     for exp in exps {
         let evaluated = eval(exp.as_ref(), Rc::clone(&env));
-        if is_error(&evaluated) {
+        if is_error(&*evaluated) {
             return vec![evaluated];
         }
         result.push(evaluated);
@@ -203,18 +205,60 @@ fn eval_expressions(
     result
 }
 
+fn eval_hash_literal(
+    node: &ast::HashLiteral,
+    env: Rc<RefCell<object::Environment>>,
+) -> Box<dyn object::Object> {
+    let mut pairs = HashMap::new();
+
+    for (key_node, val_node) in &node.pairs {
+        let key = eval(key_node.as_ref(), Rc::clone(&env));
+        if is_error(&*key) {
+            return key;
+        }
+
+        let hash_key = match hash_key_for(&*key) {
+            Some(hash_key) => hash_key,
+            None => return new_error(format!("unusable as hash key: {}", key.object_type())),
+        };
+
+        let value = eval(val_node.as_ref(), Rc::clone(&env));
+        if is_error(&*value) {
+            return value;
+        }
+
+        pairs.insert(hash_key, object::HashPair { key, value });
+    }
+
+    Box::new(object::HashObject { pairs })
+}
+
+fn hash_key_for(obj: &dyn object::Object) -> Option<object::HashKey> {
+    if let Some(int) = obj.as_any().downcast_ref::<object::Integer>() {
+        Some(int.hash_key())
+    } else if let Some(boolean) = obj.as_any().downcast_ref::<object::Boolean>() {
+        Some(boolean.hash_key())
+    } else {
+        obj.as_any()
+            .downcast_ref::<object::StringObject>()
+            .map(|string| string.hash_key())
+    }
+}
+
 fn eval_index_expression(
     left: Box<dyn object::Object>,
     index: Box<dyn object::Object>,
 ) -> Box<dyn object::Object> {
     if left.object_type() == object::ARRAY_OBJ && index.object_type() == object::INTEGER_OBJ {
         return eval_array_index_expression(left, index);
+    } else if left.object_type() == object::HASH_OBJ {
+        return eval_hash_index_expression(left, index);
     }
 
-    return new_error(format!(
+    new_error(format!(
         "index operator not supported: {}",
         left.object_type()
-    ));
+    ))
 }
 
 fn eval_array_index_expression(
@@ -234,6 +278,22 @@ fn eval_array_index_expression(
     }
 
     array_obj.elements[idx as usize].clone_box()
+}
+
+fn eval_hash_index_expression(
+    hash: Box<dyn object::Object>,
+    index: Box<dyn object::Object>,
+) -> Box<dyn object::Object> {
+    let hash_obj = hash.as_any().downcast_ref::<object::HashObject>().unwrap();
+    let hash_key = match hash_key_for(&*index) {
+        Some(hash_key) => hash_key,
+        None => return new_error(format!("unusable as hash key: {}", index.object_type())),
+    };
+
+    match hash_obj.pairs.get(&hash_key) {
+        Some(pair) => pair.value.clone_box(),
+        None => Box::new(object::Null),
+    }
 }
 
 fn apply_function(
@@ -466,18 +526,18 @@ pub fn new_error(message: String) -> Box<object::Error> {
     Box::new(object::Error { message })
 }
 
-fn is_error(obj: &Box<dyn object::Object>) -> bool {
+fn is_error(obj: &dyn object::Object) -> bool {
     obj.object_type() == object::ERROR_OBJ
 }
 
 #[cfg(test)]
 mod tests {
-    use std::{any::Any, cell::RefCell, rc::Rc, vec};
+    use std::{any::Any, cell::RefCell, collections::HashMap, rc::Rc, vec};
 
     use crate::{
         evaluator::eval,
         lexer,
-        object::{self},
+        object::{self, Hashable},
         parser,
     };
 
@@ -807,6 +867,10 @@ mod tests {
                 input: "\"Hello\" - \"World!\"",
                 expected_message: "unknown operator: STRING - STRING",
             },
+            ExpectError {
+                input: "{\"name\": \"Monkey\"}[fn(x) { x }];",
+                expected_message: "unusable as hash key: FUNCTION",
+            },
         ];
 
         for test in tests {
@@ -1047,6 +1111,113 @@ mod tests {
             ExpectIfElse {
                 input: "[1, 2, 3][-1]",
                 expected: &object::Null,
+            },
+        ];
+
+        for test in tests {
+            let evaluated = test_eval(test.input);
+            if let Some(eval) = evaluated.as_any().downcast_ref::<i64>() {
+                test_integer_object(evaluated.clone_box(), *eval);
+            } else {
+                test_null_object(evaluated.clone_box());
+            }
+        }
+    }
+
+    #[test]
+    fn test_hash_literal() {
+        let input = "let two = \"two\";
+            {
+                \"one\": 10 - 9,
+                two: 1 + 1,
+                \"thr\" + \"ee\": 6 / 2,
+                4: 4,
+                true: 5,
+                false: 6
+            }
+        ";
+
+        let evaluated = test_eval(input);
+        let eval = evaluated.as_any().downcast_ref::<object::HashObject>();
+        assert!(eval.is_some(), "eval didn't return hash");
+        let eval = eval.unwrap();
+
+        let expected = HashMap::from([
+            (
+                object::StringObject {
+                    value: "one".to_string(),
+                }
+                .hash_key(),
+                1,
+            ),
+            (
+                object::StringObject {
+                    value: "two".to_string(),
+                }
+                .hash_key(),
+                2,
+            ),
+            (
+                object::StringObject {
+                    value: "three".to_string(),
+                }
+                .hash_key(),
+                3,
+            ),
+            (object::Integer { value: 4 }.hash_key(), 4),
+            (object::Boolean { value: true }.hash_key(), 5),
+            (object::Boolean { value: false }.hash_key(), 6),
+        ]);
+
+        assert_eq!(
+            eval.pairs.len(),
+            expected.len(),
+            "hash has wrong num of pairs"
+        );
+
+        for (ek, ev) in &expected {
+            let pair = match eval.pairs.get(ek) {
+                Some(p) => p,
+                None => {
+                    eprintln!("no pair for given key in pairs");
+                    return;
+                }
+            };
+
+            test_integer_object(pair.value.clone_box(), *ev);
+        }
+    }
+
+    #[test]
+    fn test_hash_index_expressions() {
+        let tests = vec![
+            ExpectIfElse {
+                input: "{\"foo\": 5}[\"foo\"]",
+                expected: &5,
+            },
+            ExpectIfElse {
+                input: "{\"foo\": 5}[\"bar\"]",
+                expected: &object::Null,
+            },
+            ExpectIfElse {
+                input: "let key = \"foo\"; {\"foo\": 5}[key]",
+                expected: &5,
+            },
+            ExpectIfElse {
+                input: "{}[\"foo\"]",
+                expected: &object::Null,
+            },
+            ExpectIfElse {
+                input: "{5: 5}[5]",
+                expected: &5,
+            },
+            ExpectIfElse {
+                input: "{true: 5}[true]",
+                expected: &5,
+            },
+            ExpectIfElse {
+                input: "{false: 5}[false]",
+                expected: &5,
             },
         ];
 

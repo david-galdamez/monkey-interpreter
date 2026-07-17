@@ -1,4 +1,10 @@
-use std::{any::Any, cell::RefCell, collections::HashMap, rc::Rc};
+use std::{
+    any::Any,
+    cell::RefCell,
+    collections::HashMap,
+    hash::{DefaultHasher, Hash, Hasher},
+    rc::Rc,
+};
 
 use crate::ast;
 
@@ -23,6 +29,7 @@ pub const FUNCTION_OBJ: &str = "FUNCTION";
 pub const STRING_OBJ: &str = "STRING";
 pub const BUILTIN_OBJ: &str = "BUILTIN";
 pub const ARRAY_OBJ: &str = "ARRAY";
+pub const HASH_OBJ: &str = "HASH";
 
 #[derive(Debug, Clone, Copy)]
 pub struct Integer {
@@ -47,7 +54,7 @@ impl Object for Integer {
     }
 
     fn clone_box(&self) -> Box<dyn Object> {
-        Box::new(self.clone())
+        Box::new(*self)
     }
 }
 
@@ -74,7 +81,7 @@ impl Object for Boolean {
     }
 
     fn clone_box(&self) -> Box<dyn Object> {
-        Box::new(self.clone())
+        Box::new(*self)
     }
 }
 
@@ -99,7 +106,7 @@ impl Object for Null {
     }
 
     fn clone_box(&self) -> Box<dyn Object> {
-        Box::new(self.clone())
+        Box::new(*self)
     }
 }
 
@@ -164,7 +171,7 @@ impl Object for Error {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash)]
 pub struct StringObject {
     pub value: String,
 }
@@ -235,9 +242,9 @@ impl Object for Array {
         let elements: Vec<String> = self.elements.iter().map(|p| p.inspect()).collect();
 
         let mut buffer = String::new();
-        buffer.push_str("[");
+        buffer.push('[');
         buffer.push_str(&elements.join(", "));
-        buffer.push_str("]");
+        buffer.push(']');
 
         buffer
     }
@@ -337,5 +344,143 @@ impl Environment {
 
     pub fn set(&mut self, name: String, val: Box<dyn Object>) {
         self.store.insert(name, val);
+    }
+}
+
+pub trait Hashable {
+    fn hash_key(&self) -> HashKey;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct HashKey {
+    object_type: ObjectType,
+    value: u64,
+}
+
+impl Hashable for Boolean {
+    fn hash_key(&self) -> HashKey {
+        let value = if self.value { 1 } else { 0 };
+
+        HashKey {
+            object_type: self.object_type(),
+            value,
+        }
+    }
+}
+
+impl Hashable for Integer {
+    fn hash_key(&self) -> HashKey {
+        HashKey {
+            object_type: self.object_type(),
+            value: u64::try_from(self.value).unwrap_or_default(),
+        }
+    }
+}
+
+impl Hashable for StringObject {
+    fn hash_key(&self) -> HashKey {
+        let mut hasher = DefaultHasher::new();
+        self.value.hash(&mut hasher);
+        HashKey {
+            object_type: self.object_type(),
+            value: hasher.finish(),
+        }
+    }
+}
+
+pub struct HashPair {
+    pub key: Box<dyn Object>,
+    pub value: Box<dyn Object>,
+}
+
+pub struct HashObject {
+    pub pairs: HashMap<HashKey, HashPair>,
+}
+
+impl Clone for HashPair {
+    fn clone(&self) -> Self {
+        HashPair {
+            key: self.key.clone_box(),
+            value: self.value.clone_box(),
+        }
+    }
+}
+
+impl Clone for HashObject {
+    fn clone(&self) -> Self {
+        HashObject {
+            pairs: self.pairs.iter().map(|(k, v)| (*k, v.clone())).collect(),
+        }
+    }
+}
+
+impl Object for HashObject {
+    fn inspect(&self) -> String {
+        let mut pairs = Vec::new();
+
+        for pair in self.pairs.values() {
+            pairs.push(format!("{}: {}", pair.key.inspect(), pair.value.inspect()));
+        }
+
+        let mut buf = String::new();
+        buf.push('{');
+        buf.push_str(&pairs.join(", ").to_string());
+        buf.push('}');
+
+        buf
+    }
+
+    fn object_type(&self) -> ObjectType {
+        HASH_OBJ
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn into_any(self: Box<Self>) -> Box<dyn Any> {
+        self
+    }
+
+    fn clone_box(&self) -> Box<dyn Object> {
+        Box::new(self.clone())
+    }
+}
+
+mod tests {
+    use crate::object::{Hashable, StringObject};
+
+    #[test]
+    fn test_string_hash_key() {
+        let hello1 = StringObject {
+            value: String::from("Hello World"),
+        };
+        let hello2 = StringObject {
+            value: String::from("Hello World"),
+        };
+        let diff2 = StringObject {
+            value: String::from("My name is johnny"),
+        };
+        let diff1 = StringObject {
+            value: String::from("My name is johnny"),
+        };
+
+        assert_eq!(
+            hello1.hash_key(),
+            hello2.hash_key(),
+            "strings with same content have different hash keys"
+        );
+
+        assert_eq!(
+            diff1.hash_key(),
+            diff2.hash_key(),
+            "strings with same content have different hash keys"
+        );
+
+        assert_ne!(
+            hello1.hash_key(),
+            diff1.hash_key(),
+            "strings with same content have different hash keys"
+        );
     }
 }

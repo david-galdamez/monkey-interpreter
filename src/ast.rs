@@ -1,4 +1,4 @@
-use std::{any::Any, fmt, ops::Index};
+use std::{any::Any, fmt};
 
 use crate::token;
 
@@ -614,6 +614,45 @@ impl Node for IndexExpression {
 }
 
 impl Expression for IndexExpression {
+    fn expression_node(&self) {}
+    fn as_node(self: Box<Self>) -> Box<dyn Node> {
+        self
+    }
+    fn clone_box(&self) -> Box<dyn Expression> {
+        Box::new(self.clone())
+    }
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct HashLiteral {
+    pub token: token::Token, // token::IDENT token
+    pub pairs: Vec<(Box<dyn Expression>, Box<dyn Expression>)>,
+}
+
+impl fmt::Display for HashLiteral {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut pairs = Vec::new();
+        for (k, v) in &self.pairs {
+            pairs.push(format!("{}:{}", k, v));
+        }
+
+        write!(f, "{{")?;
+        write!(f, "{}", pairs.join(", "))?;
+        write!(f, "}}")
+    }
+}
+
+impl Node for HashLiteral {
+    fn token_literal(&self) -> &str {
+        &self.token.literal
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+impl Expression for HashLiteral {
     fn expression_node(&self) {}
     fn as_node(self: Box<Self>) -> Box<dyn Node> {
         self

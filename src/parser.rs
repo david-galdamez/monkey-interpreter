@@ -1,9 +1,9 @@
-use std::{collections::HashMap, mem, ops::Index};
+use std::{collections::HashMap, mem};
 
 use crate::{
     ast::{
         ArrayLiteral, BlockStatement, Boolean, CallExpression, Expression, ExpressionStatement,
-        FunctionLiteral, Identifier, IfExpression, IndexExpression, InfixExpression,
+        FunctionLiteral, HashLiteral, Identifier, IfExpression, IndexExpression, InfixExpression,
         IntegerLiteral, LetStatement, PrefixExpression, Program, ReturnStatement, Statement,
         StringLiteral,
     },
@@ -78,6 +78,7 @@ impl<'a> Parser<'a> {
         parser.register_prefix(token::FUNCTION, Parser::parse_function_literal);
         parser.register_prefix(token::STRING, Parser::parse_string_literal);
         parser.register_prefix(token::LBRACKET, Parser::parse_array_literal);
+        parser.register_prefix(token::LBRACE, Parser::parse_hash_literal);
 
         // register infixes
         parser.register_infix(token::PLUS, Parser::parse_infix_expression);
@@ -335,7 +336,7 @@ impl<'a> Parser<'a> {
         if parser.peek_token_is(token::ELSE) {
             parser.next_token();
 
-            if !parser.peek_token_is(token::LBRACE) {
+            if !parser.expect_peek(token::LBRACE) {
                 return None;
             }
 
@@ -381,6 +382,36 @@ impl<'a> Parser<'a> {
         array.elements = parser.parse_expression_list(token::RBRACKET);
 
         Some(Box::new(array))
+    }
+
+    fn parse_hash_literal(parser: &mut Parser) -> Option<Box<dyn Expression>> {
+        let mut hash = HashLiteral {
+            token: parser.cur_token.clone(),
+            ..Default::default()
+        };
+
+        while !parser.peek_token_is(token::RBRACE) {
+            parser.next_token();
+            let key = parser.parse_expression(ExpressionConstants::LOWEST);
+
+            if !parser.expect_peek(token::COLON) {
+                return None;
+            }
+
+            parser.next_token();
+            let value = parser.parse_expression(ExpressionConstants::LOWEST);
+            hash.pairs.push((key.unwrap(), value.unwrap()));
+
+            if !parser.peek_token_is(token::RBRACE) && !parser.expect_peek(token::COMMA) {
+                return None;
+            }
+        }
+
+        if !parser.expect_peek(token::RBRACE) {
+            return None;
+        }
+
+        Some(Box::new(hash))
     }
 
     // infixes
@@ -529,13 +560,14 @@ impl<'a> Parser<'a> {
 
 #[cfg(test)]
 mod tests {
-    use std::any::Any;
+    use std::{any::Any, collections::HashMap};
 
     use crate::{
         ast::{
-            ArrayLiteral, Boolean, CallExpression, Expression, ExpressionStatement,
-            FunctionLiteral, Identifier, IfExpression, IndexExpression, InfixExpression,
-            IntegerLiteral, LetStatement, Node, PrefixExpression, ReturnStatement, StringLiteral,
+            self, ArrayLiteral, Boolean, CallExpression, Expression, ExpressionStatement,
+            FunctionLiteral, HashLiteral, Identifier, IfExpression, IndexExpression,
+            InfixExpression, IntegerLiteral, LetStatement, Node, PrefixExpression, ReturnStatement,
+            StringLiteral,
         },
         lexer::Lexer,
         parser::Parser,
@@ -1556,6 +1588,103 @@ mod tests {
         if !test_infix_expression(&idx.index.as_ref().unwrap(), &1, "+", &1) {
             return;
         }
+    }
+
+    #[test]
+    fn test_parsing_hash_literal_string_key() {
+        let input = "{\"one\": 1, \"two\": 2, \"three\": 3}";
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer);
+        let program = parser.parse_program();
+        check_parse_errors(&parser);
+
+        assert!(program.is_some(), "parse_program() returned none");
+
+        let program = program.unwrap();
+        let type_stmt = program.statements[0]
+            .as_any()
+            .downcast_ref::<ExpressionStatement>();
+
+        assert!(
+            type_stmt.is_some(),
+            "program.statement[0] is not an expression statement"
+        );
+
+        let stmt = type_stmt.unwrap();
+        let hash = match &stmt.expression {
+            Some(expression) => {
+                let exp = expression.as_any();
+                exp.downcast_ref::<HashLiteral>()
+            }
+            None => {
+                panic!("no expression found");
+            }
+        };
+        assert!(
+            hash.is_some(),
+            "statement.expression is not a HashLiteral expression"
+        );
+        let hash = hash.unwrap();
+
+        assert!(
+            hash.pairs.len() == 3,
+            "hash.pairs has wrong length. got = {}",
+            hash.pairs.len()
+        );
+
+        let expected = HashMap::from([("one", 1), ("two", 2), ("three", 3)]);
+
+        for (k, v) in &hash.pairs {
+            let literal = k.as_any().downcast_ref::<ast::StringLiteral>();
+            assert!(literal.is_some(), "key is not ast.StringLiteral");
+            let literal = literal.unwrap();
+
+            let expected_val = expected.get(literal.value.as_str());
+            test_integer_literal_helper(&v, expected_val.unwrap());
+        }
+    }
+
+    #[test]
+    fn test_parsing_empty_hash_literal() {
+        let input = "{}";
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer);
+        let program = parser.parse_program();
+        check_parse_errors(&parser);
+
+        assert!(program.is_some(), "parse_program() returned none");
+
+        let program = program.unwrap();
+        let type_stmt = program.statements[0]
+            .as_any()
+            .downcast_ref::<ExpressionStatement>();
+
+        assert!(
+            type_stmt.is_some(),
+            "program.statement[0] is not an expression statement"
+        );
+
+        let stmt = type_stmt.unwrap();
+        let hash = match &stmt.expression {
+            Some(expression) => {
+                let exp = expression.as_any();
+                exp.downcast_ref::<HashLiteral>()
+            }
+            None => {
+                panic!("no expression found");
+            }
+        };
+        assert!(
+            hash.is_some(),
+            "statement.expression is not a HashLiteral expression"
+        );
+        let hash = hash.unwrap();
+
+        assert!(
+            hash.pairs.len() == 0,
+            "hash.pairs has wrong length. got = {}",
+            hash.pairs.len()
+        );
     }
 
     // HELPERS FOR THE TESTS
